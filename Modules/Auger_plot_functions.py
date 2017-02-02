@@ -887,7 +887,7 @@ def reportcountsback(paramlog, plotelems, AESquantparams, backfitdf=False, PDFna
                 print(AugerFileName,' skipped ... not found.')
                 continue
             Params=paramlog.loc[index] # grab row for this spe file as Series
-            filenumber=Params.Filenumber # retrieve filenumber            
+            # filenumber=Params.Filenumber # retrieve filenumber            
             energyvals=findevbreaks(Params, Augerfile) # get x energy vals for evbreaks in this multiplex (if they exist) as float
             # determine size of plot for this filenumber (same for all areas)
             plotranges=getplotboundaries(Augerfile, plotelems, AESquantparams) # returns plot ranges for all regions with data from plotelems
@@ -917,8 +917,12 @@ def reportcountsback(paramlog, plotelems, AESquantparams, backfitdf=False, PDFna
                     indexptslist=[int(i) for i in indexptslist] # make sure all index #s are ints 
                     indexptslist.sort()
                 # set plot row and column for this element range (from plotelems -- plotranges)
-                numcols=2 # 
-                numrows=math.ceil(len(plotranges)/2)
+                if len(plotranges)==1:
+                    numcols=1
+                    numrows=1
+                else:
+                    numcols=2 # 
+                    numrows=math.ceil(len(plotranges)/2)
                 # new plot for each spatial area
                 try:
                     fig, axes = plt.subplots(nrows=numrows, ncols=numcols, figsize=(16,9), squeeze=False) # 2 by 3 axes array
@@ -959,7 +963,7 @@ def reportcountsback(paramlog, plotelems, AESquantparams, backfitdf=False, PDFna
                             if val > lower and val < upper: 
                                 axes[thisrow,thiscol].axvline(x=val, color='r') # on counts plot 
                     for subplt in range(0,numrows*numcols): # hide any empty subplots
-                        if subplt>numrows*numcols:
+                        if subplt>len(plotranges)-1:
                             axes[subplt%numrows,subplt//numrows].set_visible(False)
                     pdf.savefig(fig)
                     plt.close(fig) # closes recently displayed figure (since it's saved in PDF report)
