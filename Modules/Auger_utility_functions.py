@@ -67,8 +67,8 @@ def loadmainfiles():
     else:
         print('Backfitlog not found.')
         Backfitlog=pd.DataFrame()
-    if os.path.isfile('C:\\Users\\tkc\\Documents\\Python_Scripts\\Params\\AESquantparams.csv'):
-        AESquantparams=pd.read_csv('C:\\Users\\tkc\\Documents\\Python_Scripts\\Params\\AESquantparams.csv', encoding='cp437')
+    if os.path.isfile('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Params\\AESquantparams.csv'):
+        AESquantparams=pd.read_csv('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Params\\AESquantparams.csv', encoding='cp437')
     else:
         print('AESquantparams not found.')
         AESquantparams=pd.DataFrame()

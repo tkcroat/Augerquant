@@ -9,8 +9,8 @@ First get it working for single file.
 import pandas as pd
 import numpy as np
 import os, sys, shutil, glob, re
-if 'C:\\Users\\tkc\\Documents\\Python_Scripts' not in sys.path:
-    sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts')
+if 'C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules' not in sys.path:
+    sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules')
 
 import Auger_smdifquant_functions as AESsmquant
 import Auger_integquant_functions as AESintquant
@@ -198,12 +198,14 @@ plotelems=['Fe','Fe2','Mg','Si', 'Au','Au2']
 plotelems=['In','O','Mg','Si', 'Pt','Ga']
 plotelems=['In','O','Mg','Si', 'Pt','Ga','Fe','Fe2','S','Ca','Al']
 plotelems=['Mg','Si','Fe']
+plotelems=['C','O', 'Si']
 plotelems=['30-2130']
+
 
 testlist=spelist[0:1] # select subset from above list of spectra
 # General smooth-differentiated plot report for selected elements
 
-AESplot.reportSD(spelist, Smdifpeakslog, plotelems, AESquantparams, PDFname='SDreport_8Jan17.pdf')
+AESplot.reportSD(spelist, Smdifpeakslog, plotelems, AESquantparams, PDFname='SDreport_2Feb17.pdf')
 AESplot.reportSD(Mgrich, Smdifpeakslog, plotelems, AESquantparams, PDFname='Mgrich_areas.pdf')
 AESplot.reportSD(subspelist, Smdifpeakslogsubs, plotelems, AESquantparams, PDFname='SDreportsubs_3Jan17.pdf')
 AESplot.reportSD(tempspe, Smdifpeakslog, plotelems, AESquantparams, PDFname='SDreportsubs_test.pdf')

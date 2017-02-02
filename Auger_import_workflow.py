@@ -11,8 +11,8 @@ import os, glob,sys # already run with functions
 import pandas as pd
 #import re, struct (only used in sub-functions)
 # import csv, fileinput
-if 'C:\\Users\\tkc\\Documents\\Python_Scripts' not in sys.path:
-    sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts')
+if 'C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules' not in sys.path:
+    sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules')
 import Auger_batch_import_functions as Auger
 import Auger_quantmap_functions as QM
 
@@ -38,11 +38,8 @@ Auger.checklogfile(filelist, Augerlogbook)
 # If file in Augerparamlog.csv it won't be reprocessed.. for reprocessing delete filenumber from that log or delete entire log
 AugerParamLog = Auger.Augerbatchimport(filelist, Augerlogbook) # Extract params and process SEM, SPE and MAP files
 
-AugerParamLog = Augerbatchimport(filelist, Augerlogbook) 
-
 spelist=AugerParamLog[(AugerParamLog['Areas']>=1)]  # remove image & map files 
 
-AugerParamLog = Augerbatchimport(filelist, Augerlogbook) 
 # Create jpg images annotated with spatial areas for spe files (assumes existence of .sem image taken just before .spe file)
 # easiest to do this before moving combined files (into separate log)
 SpatialAreas=pd.read_csv('spatialareaslog.csv') # open automatically created spatial areas log for spe files
