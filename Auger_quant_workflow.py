@@ -131,6 +131,7 @@ Integquantlog=pd.read_csv('Integquantlog.csv', encoding='cp437')
 # load peak positions, kfactors, integration params, etc.
 AESquantparams=pd.read_csv('C:\\Users\\tkc\\Documents\\Python_Scripts\\Params\\AESquantparams.csv', encoding='utf-8')
 
+
 # MAIN BATCH INTEGRAL METHOD fitting and direct integration loops (returns background fitting params and integrated quant results)
 # WARNING ... overwrite=True will overwrite background fit and peaks columns in source csv file (counts obviously unchanged)
 Backfitlog, Integquantlog = AESintquant.integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=True, overwrite=True)
@@ -200,7 +201,6 @@ plotelems=['In','O','Mg','Si', 'Pt','Ga','Fe','Fe2','S','Ca','Al']
 plotelems=['Mg','Si','Fe']
 plotelems=['C','O', 'Si']
 plotelems=['30-2130']
-
 
 testlist=spelist[0:1] # select subset from above list of spectra
 # General smooth-differentiated plot report for selected elements
@@ -316,7 +316,7 @@ Compresult.to_csv('integ_avgcomp_vs_subs_5Jan17.csv', index=False)
 #%% COMPARISON PLOTS OF DERIVATIVE VS INTEGRAL COMPOSITIONS
 # Reload composition files for sm diff (deriv) and integral methods 
 Smdifcomp=pd.read_csv('Smdifcomp.csv', encoding='cp437')
-Smdifcomp2=pd.read_excel('Smdiffcomp_02Jan17.xlsx', sheetname='smdiffcomp')
+Smdifcomp=pd.read_excel('Smdiffcomp_08Jan17.xlsx', sheetname='smdiffcomp')
 Smdifcompsubs=pd.read_excel('sub\\smdiffcomp_04Jan17.xlsx', sheetname='smdiffcomp')
 # Read back calculated and saved compositions
 Integcomp=pd.read_excel('integcomp_02Jan17.xlsx', sheetname='integcomp')
@@ -325,6 +325,18 @@ Integcompsubs=pd.read_excel('sub\\integcomp_02Jan17.xlsx', sheetname='integcomp'
 Smdifcomp=AESutils.dropexcluded(Smdifcomp,spelist) # refilter any df by filenumber based on filtered spe list
 Integcomp=AESutils.dropexcluded(Integcomp,spelist) 
 Smdifcomp.to_csv('temp.csv', index=False)
+
+# Set keyword arguments (dict) for plotting functions (some are optional others have built-in defaults)
+kwargs={}
+kwargs.update({'basis':False}) # can plot Auger basis (before at% conversion) or atomic percent
+kwargs.update({'errbars':'xy'}) # Optional error bars on x, y or xy
+# Join options for comparison of comp1 and comp2 
+# For comparing smdiff and integ comps on exact same file (default value)
+kwargs.update({'joinlist':['Filenumber','Areanumber']}) 
+kwargs.update({'joinlist':['Sample']}) # Compare all spectra from same sample (more points); 
+# Sample join can be erroneous (i.e. if some areanumbers in spe file are background not sample)
+kwargs.update({'thresh':0.1}) # threshold for defining/returning point as outlier (higher gives more outliers)
+
 # Directly compare deriv and integ on exact same data files with multi-element scatter plots
 compdata, outliers=AESplot.scattercompplot(Smdifcomp,Integcomp, Elements, joinlist=['Filenumber','Areanumber'], thresh=0.1, basis=True, errbars='y')
 compdata, outliers=AESplot.scattercompplot(Smdifcomp,Integcomp, Elements, joinlist=['Filename','Areanumber'], thresh=0.05, basis=True, errbars='y')
@@ -419,7 +431,7 @@ samplelist=['f2-1c5', 'f2-1c6', 'f2-1c7', 'f2-2c5', 'f7-2c2', 'f7-2c3', 'f7-3c2'
 # Get spectra with strongest peaks (top ten) for any element
 Carich=CompC2010WselectavgFe.sort('Ca',ascending=False)
 Carich=Carich.head(10)
-Mgrich=CompC2010WselectavgFe.sort('Mg',ascending=False)ww
+Mgrich=CompC2010WselectavgFe.sort('Mg',ascending=False)
 Mgrich=Mgrich.head(10)
 
 compFeredo=C2010WAESmajor2[C2010WAESmajor2['Fe']>0]
@@ -460,4 +472,22 @@ integcompwithCa=integcomp[integcomp['Ca']>0]
 integcompwithCa=integcompwithCa.sort_values(['Ca'], ascending=True)
 temp=integcompwithCa.head(10)
 integcompwithCa.to_csv('Ca_containing.csv')
+
+# Subset of higher mag images (cropped)
+AugerParamLog=pd.read_csv('Augerparamlog.csv', encoding='cp437')
+images=AugerParamLog[AugerParamLog['Filename'].str.contains('.sem')]
+images=images[images['FieldofView']<25]
+images['Filename']=images['Filename'].replace('.sem','.jpg', regex=True)
+images=images.drop_duplicates('Sample')
+# only single images 
+images=images[~images['Sample'].str.contains('and')]
+images=images[~images['Sample'].str.contains(',')]
+images=images[~images['Sample'].str.contains('/')]
+AESutils.copyselectfiles(images,'images')
+# Drop multi-image craters
+singleim=images[~images['Sample'].str.contains('and')]
+
+cratersizes=pd.read_excel('C:\\Users\\tkc\Desktop\\Research\\Stardust_craters\\C2010W_crater_logbook.xlsx', sheetname='Crater_positions')
+# Autocrop each image based on max diam measurement
+
 

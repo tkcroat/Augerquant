@@ -304,31 +304,92 @@ def scatplot(df, xcol='Energy', ycol='Counts', thresh=0.1):
     if not outliers.empty : # plot outliers in red
         outliers.plot.scatter(x=xcol, y=ycol, ax=axes, color='r')    
     return outliers  
-  
-def scattercompplot(comp1, comp2, elemlist, joinlist=['Filenumber','Areanumber'], thresh=0.1, basis=False, errbars='xy'):
+
+def get_plotkwargs(mykwargs, elem):
+    ''' gets subset of keyword arguments that are needed as plot arguments
+    pass elem to construct x and y err col names which may be needed 
+    
+    '''
+    kwargdict={} # new dict for pandas plot options only
+    if 'errbars' in mykwargs:
+        val=mykwargs.get('errbars')
+        hasxerr=mykwargs.get('errx', False) # true if x error col exists
+        hasyerr=mykwargs.get('erry', False) 
+        if 'x' in val and hasxerr:
+            # col name after merge depends on both hasxerr and hasyerr
+            if hasyerr:
+                colname='err'+elem+'1'
+            else:
+                colname='err'+elem
+            kwargdict.update({'xerr':colname}) # name of x error column 
+        if 'y' in val and hasyerr: # either errSi or errSib depending on merge
+            if hasxerr:
+                colname='err'+elem+'2' # suffix only appended for duplicate cols
+            else:
+                colname='err'+elem
+            kwargdict.update({'yerr':colname}) # name of x error column 
+    if 'log' in mykwargs: # Also can use log scale on plots 
+        val=mykwargs.get('log')
+        if val=='xy':
+            kwargdict.update({'loglog':True})
+        elif val=='x':
+            kwargdict.update({'logx':True})
+        elif val=='y':
+            kwargdict.update({'logx':True})
+    return kwargdict
+
+''' Plot unit testing
+comp1=Smdifcomp
+comp2=Integcomp
+kwargs1=get_plotkwargs(kwargs, elem)
+kwargs.update({'errx':False})
+compdata, outliers=AESplot.scattercompplot(Smdifcomp,Integcomp, Elements, **kwargs)
+'''
+
+def scattercompplot(comp1, comp2, elemlist, **kwargs):
     '''Pass two versions of composition calculation (using different lines or whatever) and compare 
     major elements using scatter graphs .. single point for each sample
     uses inner merge to select only subset with values from each df
-	use either sample or filenumber'''
+    elemlist: set of elements to compare in scatter plots (multiple subplots created) 
+    Keyword args:
+    joinlist: list of columns to use for merge of two composition files
+        filenumber, areanumber is default and used to compare compositions from exact same spe files 
+        but computed via sm-diff or integ methods 
+        sample - returns all sample inner merge matches (some of which could be ), such as if a 
+        background region were also measured as one of the areas in an spe file
+    thresh - always used; distinguishes outlier points in scatter plot; defaults to 0.1
+          higher gives more outliers which are returned and plotted separately
+    basis - bool (true means plot basis, false is defaul at.% plot)
+    errbars - optional plotting of x, y or xy error bars
+    '''
     
     elemlist=[re.match('\D+',i).group(0) for i in elemlist] 
     # strip number from peaks like Fe2 if present; columns will be element names (Fe) not peak names (Fe2)
-    if basis==False: # use atomic % (which is the default), not basis for each element
-        elemlist=['%'+s for s in elemlist]
+    basis=kwargs.get('basis', False) # boolean for plot of at.% (default) or direct basis
+    if basis: # plot basis if true, default at.% if false
+        elemlist=['%'+s for s in elemlist]            
     numregions=len(elemlist)
-    
+    # Check if error columns are present in passed comp dataset (test w/ elem1 but should be same for all)
+    tempname='err'+elemlist[0]
+    if tempname in comp1:
+        kwargs.update({'errx':True})
+    if tempname in comp2:
+        kwargs.update({'erry':True})
     # set nrows and ncols for figure of proper size
     cols=divmod(numregions,2)[0]+ divmod(numregions,2)[1]
     if numregions>1:
         rows=2
     else:
         rows=1        
-    fig, axes = plt.subplots(nrows=rows, ncols=cols) # axes is array
-    # merge dfs with comp1 and comp2 using inner join    
+    fig, axes = plt.subplots(nrows=rows, ncols=cols, squeeze=False) # axes is array
+    plt.tight_layout()  # normally tight layout needed
+    # Get choice for how to merge two separate compositions 
+    joinlist=kwargs.get('joinlist',['Filenumber','Areanumber']) # defaults to file# & area#
+    # Merge dfs with comp1 and comp2 using inner join 
     compdata=pd.merge(comp1, comp2, how='inner', on=joinlist, suffixes=('','b'))
-    mycols=compdata.dtypes.index # list of same columns
-    mycols=mycols.tolist()
+    mycols=compdata.dtypes.index.tolist() # list of columns from full dataset
     #mycols=mycols.append('Element')
+    # Prepare dataframes for full returned datasets
     outliers=pd.DataFrame(columns=mycols) # empty dataframe for outlying points
     fulldata=pd.DataFrame(columns=mycols)
     newcols=['Resid','Pval','Bonf', 'Element'] # single column for residuals but separate value needed for each row per element
@@ -336,67 +397,47 @@ def scattercompplot(comp1, comp2, elemlist, joinlist=['Filenumber','Areanumber']
     for i, cname in enumerate(newcols):
         outliers[cname]=''
         fulldata[cname]=''
+    # now create scatter plot for each requested element
     for i,elem in enumerate(elemlist):
         # new version of base compositional data for each loop (otherwise reindexing problems)
-        compdata=pd.merge(comp1, comp2, how='inner', on=joinlist, suffixes=('','b')) 
+        compdata=pd.merge(comp1, comp2, how='inner', on=joinlist, suffixes=('1','2')) 
          # determine which subplot to use
         if (i+1)%2==1:
             rownum=0
         else:
             rownum=1
         colnum=int((i+1)/2.1)       
-        xcol=elem
-        ycol=elem+'b' # same element from second dataset
-        if numregions==1: # deal with single subplot separately
-            compdata.plot.scatter(x=xcol, y=ycol, ax=axes) # single plot axes has no [#,#]
-        else:
-            compdata.plot.scatter(x=xcol, y=ycol, ax=axes[rownum,colnum])
-            # linear regression: fitting, plot and add labels
-        xdata=compdata[elem].as_matrix() # this data column as np array
-        colname=elem+'b'
-        ydata=compdata[colname].as_matrix()
+        xcol=elem+'1'
+        ycol=elem+'2' # same element from second dataset
+        axindex=rownum, colnum # 
+        # Check if error bars needed and if so check/find/return error bar columns
+        kwarg1=get_plotkwargs(kwargs, elem)
+        compdata.plot.scatter(x=xcol, y=ycol, ax=axes[axindex], **kwargs1) # single plot axes has no [#,#]
+        # linear regression: fitting, plot and add labels
+        xdata=compdata[xcol].as_matrix() # this data column as np array
+        ydata=compdata[ycol].as_matrix()
         slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(xdata, ydata) # imported from scipy.stats
         # set x range for linear plot 
         text1=str(round(slope,3))+' *x +' + str(round(intercept,3))
         text2='R = ' + str(round(r_value,3)) + ' p = '+str(round(p_value,4))
-        if basis==False: # compositional plot so generally 0 to 1 for x and y axes
-            xmax=max(max(xdata),max(ydata))*1.1 # set to slightly larger than max of dataset
-        else: # if plotting elemental basis set to appropriate xmax (and y range will follow)
-            xmax=max(xdata)
-        x=np.linspace(0,xmax,100) # setting range for 
-        if numregions==1: # deal with single subplot separately
-            axes.text(0.025,0.9, text1, fontsize=12, transform=axes.transAxes)
-            axes.text(0.025,0.8, text2, fontsize=12, transform=axes.transAxes)
-            plt.plot(x, x*slope+intercept, color='r') # plot appropriate line
-        else: # typical multiarea plot
-            axes[rownum,colnum].text(0.025,0.9, text1, fontsize=12, transform=axes[rownum,colnum].transAxes)
-            axes[rownum,colnum].text(0.025,0.8, text2, fontsize=12, transform=axes[rownum,colnum].transAxes)
-            plt.axes(axes[rownum,colnum]) # set correct axes as active
-            plt.plot(x, x*slope+intercept, color='r') # plot appropriate line
+        x=np.linspace(0,max(xdata)*1.05,100) # set range for lin regress plot (slightly larger than xmax)
+        # Add labels to correct position in this subplot 
+        axes[rownum,colnum].text(0.025,0.9, text1, fontsize=12, transform=axes[axindex].transAxes)
+        axes[rownum,colnum].text(0.025,0.8, text2, fontsize=12, transform=axes[axindex].transAxes)
+        plt.axes(axes[axindex]) # set correct axes as active
+        plt.plot(x, x*slope+intercept, color='r') # plot appropriate line
         # Now test, plot and return outliers
         theseoutliers=returnoutliers(xdata.tolist(), ydata.tolist()) # index # 
         # Add residual and pval to each compositional comparison line
         compdata= pd.concat([compdata, theseoutliers], axis=1, join='inner') # same length so just join by index
         compdata['Element']=elem # set after concat operation
-        theseoutliers=compdata[compdata['Pval']<thresh] # now filter by threshold for outliers (with all cols)
-        if not theseoutliers.empty and numregions==1:
-            if errbars=='xy' and 'err'+elem in theseoutliers and 'err'+elem+'b' in theseoutliers: # plottable x and y error column
-                theseoutliers.plot.scatter(x=xcol, y=ycol, xerr='err'+elem, yerr='err'+elem+'b', ax=axes, color='r')
-            elif errbars=='x' and 'err'+elem in theseoutliers: # plottable x error column exists
-                theseoutliers.plot.scatter(x=xcol, y=ycol, xerr='err'+elem, ax=axes, color='r')
-            elif errbars=='y' and 'err'+elem in theseoutliers: # plottable y error column exists
-                theseoutliers.plot.scatter(x=xcol, y=ycol, yerr='err'+elem, ax=axes, color='r')
-            else: # no plottable errors for outliers
-                theseoutliers.plot.scatter(x=xcol, y=ycol, ax=axes, color='r')
-        if not theseoutliers.empty and numregions>1:
-            if errbars=='xy' and 'err'+elem in theseoutliers and 'err'+elem+'b' in theseoutliers: # plottable x and y error column
-                theseoutliers.plot.scatter(x=xcol, y=ycol, xerr='err'+elem, yerr='err'+elem+'b', ax=axes[rownum,colnum], color='r')
-            elif errbars=='x' and 'err'+elem in theseoutliers: # plottable x error column exists
-                theseoutliers.plot.scatter(x=xcol, y=ycol, xerr='err'+elem, ax=axes[rownum,colnum], color='r')
-            elif errbars=='y' and 'err'+elem in theseoutliers: # plottable y error column exists
-                theseoutliers.plot.scatter(x=xcol, y=ycol, yerr='err'+elem, ax=axes[rownum,colnum], color='r')
-            else: # no plottable errors for outliers
-                theseoutliers.plot.scatter(x=xcol, y=ycol, ax=axes[rownum,colnum], color='r')
+        thresh=kwargs.get('thresh',0.1) # 0.1 default value (always using some outlier threshold)
+        theseoutliers=compdata[compdata['Pval']<thresh] # now filter by threshold for outliers (with all cols)         
+
+        # Now set correct axes name which depends on # of regions
+        if not theseoutliers.empty: # plot outliers on top in different color
+            theseoutliers.plot.scatter(x=xcol, y=ycol, ax=axes[axindex], color='r', **kwargs1)
+            # kwargs1 contains x and/or y error columns if requested
         # hide subplots with no data
         for i in range(0,rows*cols):
             if i>len(elemlist)-1: # hide this axis

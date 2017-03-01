@@ -14,6 +14,7 @@ import pandas as pd
 if 'C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules' not in sys.path:
     sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules')
 import Auger_batch_import_functions as Auger
+import Auger_utility_functions as AESutils
 import Auger_quantmap_functions as QM
 
 #%% Set data directory with Auger data files (via cd in Ipython console, using tinker or using os.chdir)
