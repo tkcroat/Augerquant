@@ -19,6 +19,7 @@ from matplotlib.widgets import LassoSelector
 from matplotlib import path
 from PIL import Image, ImageDraw, ImageFont 
 from collections import defaultdict
+import numpy as np
 # Plotting all numpy histograms from elementmaps
 def plothistograms(elementmaps, Elements)
 
@@ -38,6 +39,60 @@ plt.figimage(Simap)
 
 plt.hist(Mgmap.ravel(), bins=20)
 
+
+ROIarray=selectROI()
+
+myarray=makeROI('tr184.171.jpg')
+myarray=makeROI('F01_3Mar17_ibeam_075.jpg')
+
+def makeROI(imagename):
+    '''Returns ROI from image either for QM data averaging or for setting active areas for mapping 
+    has several inner functions '''
+    fig = plt.figure()
+    ax1 = fig.add_subplot(121) # 1 x 2 grid -first subplot
+    ax1.set_title('Lasso selection:')
+    ax1.plot()
+    ax1.set_xlim([0, 512])
+    ax1.set_ylim([0, 512])    
+    ax1.set_aspect('equal')
+    thisim=Image.open(imagename)
+    ax1.imshow(thisim) # added image
+    
+    # Empty array to be filled with lasso selector
+    array = np.zeros((512,512))
+    ax2 = fig.add_subplot(122) # 1 x 2 grid -second subplot
+    ax2.set_title('numpy array:')
+    msk = ax2.imshow(array, origin='lower',vmax=1, interpolation='nearest')
+    ax2.set_xlim([-1, 512])
+    ax2.set_ylim([-1, 512])
+    
+    # Pixel coordinates
+    pix = np.arange(512)
+    xv, yv = np.meshgrid(pix,pix) # just makes rectangular array
+    pix = np.vstack( (xv.flatten(), yv.flatten()) ).T # .T returns transpose of array or matrix
+    return ax1, array
+    
+    def onselect(verts): # verts are vertices of selected path upon lasso release
+        '''Lasso pixel selector for generating ROIs''' 
+        global array, pix
+        p = path.Path(verts)
+        ind = p.contains_points(pix, radius=1)
+        array = updateArray(array, ind)
+        msk.set_data(array)
+        fig.canvas.draw_idle() # similar to draw but renders figure only when idle
+
+    def updateArray(array, indices):
+        '''ROI display tool for quick region of interest selections (used by select ROI)'''
+        lin = np.arange(array.size)
+        newArray = array.flatten()
+        newArray[lin[indices]] = 1
+        return newArray.reshape(array.shape) 
+        
+    lasso = LassoSelector(ax1, onselect) # associated with subplot 1
+    
+    plt.show()
+    
+    return array
 
 
 def createRGB(elementmaps, elemlist, savename=''):
@@ -106,60 +161,7 @@ def getmappedelements(filenum):
     newlist=[re.match('\D+',i).group(0) for i in elements] # D is non-digit
     # if duplicate peaks, return that element with attached numbers, else return as string only
 
-    
-    
-ROIarray=selectROI()
 
-ax1=makeROI('tr184.171.jpg')
-
-def makeROI(imagename):
-    '''Returns ROI from image either for QM data averaging or for setting active areas for mapping 
-    has several inner functions '''
-    fig = plt.figure()
-    ax1 = fig.add_subplot(121) # 1 x 2 grid -first subplot
-    ax1.set_title('Lasso selection:')
-    ax1.plot()
-    ax1.set_xlim([0, 512])
-    ax1.set_ylim([0, 512])    
-    ax1.set_aspect('equal')
-    thisim=Image.open(imagename)
-    ax1.imshow(thisim) # added image
-    
-    # Empty array to be filled with lasso selector
-    array = np.zeros((512,512))
-    ax2 = fig.add_subplot(122) # 1 x 2 grid -second subplot
-    ax2.set_title('numpy array:')
-    msk = ax2.imshow(array, origin='lower',vmax=1, interpolation='nearest')
-    ax2.set_xlim([-1, 512])
-    ax2.set_ylim([-1, 512])
-    
-    # Pixel coordinates
-    pix = np.arange(512)
-    xv, yv = np.meshgrid(pix,pix)
-    pix = np.vstack( (xv.flatten(), yv.flatten()) ).T
-    return ax1, array
-    
-    def onselect(verts): # verts are vertices of selected path upon lasso release
-        '''Lasso pixel selector for generating ROIs''' 
-        global array, pix
-        p = path.Path(verts)
-        ind = p.contains_points(pix, radius=1)
-        array = updateArray(array, ind)
-        msk.set_data(array)
-        fig.canvas.draw_idle() # similar to draw but renders figure only when idle
-
-    def updateArray(array, indices):
-        '''ROI display tool for quick region of interest selections (used by select ROI)'''
-        lin = np.arange(array.size)
-        newArray = array.flatten()
-        newArray[lin[indices]] = 1
-        return newArray.reshape(array.shape) 
-        
-    lasso = LassoSelector(ax1, onselect) # associated with subplot 1
-    
-    plt.show()
-    
-    return array
     
 plt.imshow(array)
 

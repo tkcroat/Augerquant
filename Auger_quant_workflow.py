@@ -8,7 +8,7 @@ First get it working for single file.
 #%%
 import pandas as pd
 import numpy as np
-import os, sys, shutil, glob, re
+import os, sys, glob
 if 'C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules' not in sys.path:
     sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules')
 
@@ -44,7 +44,7 @@ subspelist=subspelist.loc[~subspelist['Comments'].str.contains('exclude', case=F
 
 # remove files excluded by log
 spelist=spelist.loc[~spelist['Comments'].str.contains('exclude', case=False, na=False)]
-temp=spelist.loc[[85]]
+spelist=spelist.loc[[66]]
 tempspe=subspelist[0:51]
 
 excllist=np.ndarray.tolist(Excluded.Filenumber.unique())
@@ -76,9 +76,9 @@ combinelist=combinelist.loc[320:330]
 #%% MAIN BATCH SMDIFF (DERIVATIVE) QUANT LOOP from smooth-differentiated peaks  (via Multipak S7D7 algorithm) of all selected files in dataframe
 
 #Element and background region setup
+Elements=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
 Elements=['S','C','Ca','Ti','O','Fe1','Fe2','Fe','Na','Mg','Al','Si'] # using dominant Auger peak for each element... see AESquantparams.py for associated energies
 Elements=['S','C','Ca','Ti','Ti2','O','Fe1','Fe2','Fe','Na','Mg','Al','Si','In','F'] 
-Elements=['S','C','Ca','Ti','N','O','Fe1','Fe2','Fe','Ti2','Mg','Al','Si']
 Elements=['S','C','Ca','Ti','O','Fe1','Fe2','Fe','Ti2','Mg','Al','Si','Cs','Cs2']
 Elements=['Mg']
 Elements=['C','O','Si', 'W']
@@ -89,7 +89,7 @@ Elements=['Si', 'Mg','In','Fe']
 # list of eV values where background is searched for smooth-diff peaks (gives method of determining significance of peak amplitudes)
 
 # LOAD AESQUANTPARAMS (peak positions, kfactors etc.)
-AESquantparams=pd.read_csv('C:\\Users\\tkc\\Documents\\Python_Scripts\\Params\\AESquantparams.csv', encoding='utf-8')
+AESquantparams=pd.read_csv('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Params\\AESquantparams.csv', encoding='utf-8')
 # Can also load a local version (if modifications are needed for this sample's quant
 AESquantparams=pd.read_csv('AESquantparams.csv', encoding='utf-8')
 
@@ -115,13 +115,11 @@ AESplot.plothist(Smdifpeakslog, spelist, Elements, col='Amplitude')
 AESplot.plothist(Integquantlog, spelist, Elements, col='Adjcnts')
 
 #%% DIRECT INTEGRAL QUANT METHOD 
-# now for integral method directly on counts (but guided by peak positions as determined above with smooth-diff spectrum)
+# Now for integral method directly on counts (but guided by peak positions as determined above with smooth-diff spectrum)
+Elements=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
 Elements=['S','Ca','Fe2','Fe','Mg','Si'] # choose major elements
 Elements=['Fe2','Fe','Mg','Si','Au']
-Elements=['Ca','N', 'Mg','Si','Ti','Fe','Fe2']
-Elements=['S', 'Ca','Mg','Si','Ti','Fe','Fe2']
 Elements=['S','Ca','Fe2','Fe','Mg','Si','Ti','Ti2']
-Elements=['Pt','Ga','Si', 'Mg','In']
 Elements=['S']
 
 # reload smooth-diff peak positions (if not already open)
@@ -184,6 +182,7 @@ Tirich=Smdifpeakslog[Smdifpeakslog['PeakID']=='Ti']
 Tirich=Tirich[Tirich['Amplitude']>5000]
 
 # Choose elements list to plot and label
+plotelems=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
 plotelems=['S', 'C', 'Ca','O', 'Fe', 'Fe2','Mg','Si']
 plotelems=['S','C','Ca','O', 'Fe', 'Fe2','Fe1','Mg','Si'] # list of elements/lines to label on plots
 plotelems=['C','O', 'Fe', 'Fe2','Fe1', 'Na', 'Mg','Si','Au', 'Au2']
@@ -192,15 +191,13 @@ plotelems=['C','Ca','Fe', 'Fe2','Mg','Si','O','Cs','Cs2']
 plotelems=['C','O','Fe','Mg','Si']
 plotelems=['S','Ca','O','Fe','Fe2','Mg','Si']
 plotelems=['S','Ca','Fe','Fe2','Mg','Si','O']
-plotelems=['Ti', 'N', 'Ti2','Si', 'Fe', 'Ca','S','Mg']
-plotelems=['100-2000'] # can also just enter a range
+plotelems=['Ti', 'N', 'Ti2','Si', 'Fe', 'Ca','S','Mg'] 
 plotelems=['100-500','O', 'Fe', 'Fe2'] # mixture of ranges and elements is allowed
 plotelems=['Fe','Fe2','Mg','Si', 'Au','Au2']
-plotelems=['In','O','Mg','Si', 'Pt','Ga']
 plotelems=['In','O','Mg','Si', 'Pt','Ga','Fe','Fe2','S','Ca','Al']
-plotelems=['Mg','Si','Fe']
 plotelems=['C','O', 'Si']
-plotelems=['30-2130']
+plotelems=['30-2130'] # can also just enter a range
+plotelems.append('100-500') # can also include eV range along with above list
 
 testlist=spelist[0:1] # select subset from above list of spectra
 # General smooth-differentiated plot report for selected elements
@@ -211,7 +208,7 @@ AESplot.reportSD(subspelist, Smdifpeakslogsubs, plotelems, AESquantparams, PDFna
 AESplot.reportSD(tempspe, Smdifpeakslog, plotelems, AESquantparams, PDFname='SDreportsubs_test.pdf')
 
 # plot report for direct peaks (option to include direct background fits from integral quant method)
-AESplot.reportcountsback(spelist, plotelems, AESquantparams, backfitdf=Backfitlog, PDFname='Countsback_report_30Dec16.pdf')
+AESplot.reportcountsback(spelist, plotelems, AESquantparams, backfitdf=Backfitlog, PDFname='Countsback_report_17Mar17.pdf')
 AESplot.reportcountsback(tempspe, plotelems, AESquantparams, backfitdf=Backfitlogsubs, PDFname='Countsback_subs_test.pdf')
 AESplot.reportcountsback(spelist, plotelems, AESquantparams, backfitdf=False, PDFname='countsback_report7Dec16.pdf') # just counts without backgrounds
 
@@ -337,10 +334,9 @@ kwargs.update({'joinlist':['Sample']}) # Compare all spectra from same sample (m
 # Sample join can be erroneous (i.e. if some areanumbers in spe file are background not sample)
 kwargs.update({'thresh':0.1}) # threshold for defining/returning point as outlier (higher gives more outliers)
 
-# Directly compare deriv and integ on exact same data files with multi-element scatter plots
-compdata, outliers=AESplot.scattercompplot(Smdifcomp,Integcomp, Elements, joinlist=['Filenumber','Areanumber'], thresh=0.1, basis=True, errbars='y')
-compdata, outliers=AESplot.scattercompplot(Smdifcomp,Integcomp, Elements, joinlist=['Filename','Areanumber'], thresh=0.05, basis=True, errbars='y')
-compdata, outliers=AESplot.scattercompplot(Smdifcomp, Smdifcomp2, Elements, joinlist=['Filename','Areanumber'], thresh=0.05, basis=True, errbars='y')
+# Directly compare deriv and integ on exact same data files with multi-element scatter plots (takes above keyword arguments)
+compdata, outliers=AESplot.scattercompplot(Smdifcomp,Integcomp, Elements, **kwargs)
+compdata, outliers=AESplot.scattercompplot(Smdifcomp, Smdifcomp2, Elements, **kwargs)
 
 compdata, outliers=scattercompplot(Smdifcomp,Integcomp, Elements, joinlist=['Filenumber','Areanumber'], thresh=0.1, basis=True, errbars='y')
 # basis=true plots elemental basis (strength of line) whereas false plots at.%

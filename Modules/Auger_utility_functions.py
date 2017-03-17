@@ -8,8 +8,9 @@ Assorted Auger utility functions
 #%%
 import pandas as pd
 import numpy as np
-import os, glob,sys, shutil, re # already run with functions 
+import os, glob, shutil, re # already run with functions 
 import datetime
+import tkinter as tk
 #%%
 ''' RUNNING BELOW FILE MANAGEMENT UTILITIES
 destdir='H:\\Research_data\\Stardust\\C2010W\\Auger\\18Nov15\\sub\\'
@@ -20,6 +21,84 @@ AugerParamLog=removefromlog(excludelist, AugerParamLog) # removes log entries fr
 
 AugerParamLog=removelistdups(AugerParamLog,'Evbreaks')
 '''
+
+def pickelemsGUI(AESquantparams):
+    ''' Quick method of interactively selecting elements/lines for plotting 
+    has some hard-coded presets that can be changed using preset dictionaries below
+    only elements with info in quant params csv files are selectable
+    Note.. only tkinter variables exist after root.destroy
+    '''
+    # Subset of elements selected (on) by default
+    elemdict={'S':1,'C':1,'Ti':1,'O':1,'Fe1':1,'Fe2':1,'Na':1,'Mg':1,'Al':1,'Si':1,'Fe':1,'Ca':1}
+    preset1={'S':1,'Mg':1,'Si':1,'Fe':1,'Ca':1,'Fe2':1}
+    preset2={'S':1,'Mg':1,'Si':1,'Fe':1,'Ca':1,'O':1}
+    # All available elements/peaks are those with entries in Aesquantparams.csv
+    elems=np.ndarray.tolist(AESquantparams.element.unique()) 
+    root = tk.Tk()
+    varlist=[] # list of tkinter IntVars
+    for i, col in enumerate(elems): # set up string variables
+        varlist.append(tk.IntVar())
+        val=elemdict.get(col,0) # set to 1 or 0 based on above default dictionary
+        varlist[i].set(val) # set default value based on elemdict
+        
+    tk.Label(root, text='Select elements for plotting or quant').grid(row=0,column=0)
+    
+    def choose1():
+        ''' Have available preset defaults and adjust checkbox values '''
+        # preset1={'S':1,'Mg':1,'Si':1,'Fe':1,'Ca':1,'Fe2':1}
+        # Still have to pass these through as tkinter ints
+        for i, col in enumerate(elems): # set up string variables
+            val=preset1.get(col,0) # set to 1 or 0 based on above default dictionary
+            varlist[i].set(val) # set default value based on elemdict
+        root.destroy()
+
+    def choose2():
+        ''' Have available preset defaults and adjust checkbox values '''
+        # preset2={'S':1,'Mg':1,'Si':1,'Fe':1,'Ca':1,'Fe2':1}
+        # Still have to pass these through as tkinter ints
+        for i, col in enumerate(elems): # set up string variables
+            val=preset2.get(col,0) # set to 1 or 0 based on above default dictionary
+            varlist[i].set(val) # set default value based on elemdict
+        root.destroy()
+    def clearall():
+        ''' Set all tkinter vars to zero ''' 
+        for i, col in enumerate(elems): # set up string variables
+            varlist[i].set(0) # set default value based on elemdict
+    for i, col in enumerate(elems):
+        # choose row, col grid position (starting row 1)
+        thisrow=i%3+1 # three column setup
+        thiscol=i//3
+        ent=tk.Checkbutton(root, text=elems[i], variable=varlist[i])
+        ent.grid(row=thisrow, column=thiscol)
+    # Add preset 1 button (defined above)
+    els=list(preset1)
+    mystr=', '.join(els)
+    c=tk.Button(root, text=mystr, command=choose1)
+    lastrow=len(elems)%3+2
+    c.grid(row=lastrow, column=0)
+    # Add preset 2 button
+    els=list(preset2)
+    mystr=', '.join(els)
+    d=tk.Button(root, text=mystr, command=choose2)
+    lastrow=len(elems)%3+3
+    d.grid(row=lastrow, column=0)
+    # clear all 
+    e=tk.Button(root, text='Clear all', command=clearall)
+    lastrow=len(elems)%3+4
+    e.grid(row=lastrow, column=0)
+    # add done button
+    f=tk.Button(root, text='done')
+    f.bind("<Button-1>", lambda event: root.destroy())
+    lastrow=len(elems)%3+5
+    f.grid(row=lastrow, column=0)
+
+    root.mainloop()
+
+    elemlist=[] # list of strings with plot number and x or y
+    for i, val in enumerate(varlist): # result in normal string, not tkinter StringVar
+        if val.get()==1:
+            elemlist.append(elems[i]) # add element if box is checked 
+    return elemlist
 
 def loadsubfiles():
     ''' Load of standard sub spe files (before combination via averaging from working Auger data directory '''

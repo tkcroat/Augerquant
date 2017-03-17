@@ -21,6 +21,8 @@ from math import factorial # used by Savgol matrix
 import ternary # python-ternary module
 #%% Auger plotting functions under development        
 
+
+
 def convertspelist(spelist):
     '''Convert spelist file log which has number of areas but not areanumber 
     to file pointer dataframe with filenumber, areanumber and filename, cleaner than
