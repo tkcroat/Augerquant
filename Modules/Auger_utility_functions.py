@@ -22,6 +22,71 @@ AugerParamLog=removefromlog(excludelist, AugerParamLog) # removes log entries fr
 AugerParamLog=removelistdups(AugerParamLog,'Evbreaks')
 '''
 
+def pickspectraGUI(spelist):
+    ''' Quick method of interactively selecting spectral files for plotting 
+    only elements with info in quant params csv files are selectable
+    returns dataframe subset (then pass to plotting functions)
+    '''
+    # All available elements/peaks are those with entries in Aesquantparams.csv
+    files=np.ndarray.tolist(spelist.Filenumber.unique()) 
+    root = tk.Tk()
+    varlist=[] # list of tkinter IntVars
+    for i, col in enumerate(files): # set up string variables
+        varlist.append(tk.IntVar())
+        varlist[i].set(1) # default to 1
+        
+    tk.Label(root, text='Select files for plotting or quant').grid(row=0,column=0)
+    
+    def clearall():
+        ''' Set all tkinter vars to zero ''' 
+        for i, col in enumerate(files): # set up string variables
+            varlist[i].set(0) # set default value based on elemdict
+
+    def selectall():
+        ''' Set all tkinter vars to zero ''' 
+        for i, col in enumerate(files): # set up string variables
+            varlist[i].set(1) # set default value based on elemdict
+
+    def selectcombined():
+        ''' Choose combined files (filenumber>100000)  ''' 
+        for i, col in enumerate(files): # set up string variables
+            if files[i]>100000:
+                varlist[i].set(1) # set default value based on elemdict
+            else:
+                varlist[i].set(0) # set default value based on elemdict               
+
+    for i, col in enumerate(files):
+        # choose row, col grid position (starting row 1)
+        thisrow=i%3+1 # three column setup
+        thiscol=i//3
+        ent=tk.Checkbutton(root, text=files[i], variable=varlist[i])
+        ent.grid(row=thisrow, column=thiscol)
+    # clear all 
+    e=tk.Button(root, text='Clear all', command=clearall)
+    lastrow=len(files)%3+2
+    e.grid(row=lastrow, column=0)
+    # select all 
+    e=tk.Button(root, text='Select all', command=selectall)
+    lastrow=len(files)%3+3
+    e.grid(row=lastrow, column=0)
+    e=tk.Button(root, text='Select combined', command=selectcombined)
+    lastrow=len(files)%3+4
+    e.grid(row=lastrow, column=0)
+    # add done button
+    f=tk.Button(root, text='done')
+    f.bind("<Button-1>", lambda event: root.destroy())
+    lastrow=len(files)%3+5
+    f.grid(row=lastrow, column=0)
+
+    root.mainloop()
+
+    filelist=[] # list of strings with plot number and x or y
+    for i, val in enumerate(varlist): # result in normal string, not tkinter StringVar
+        if val.get()==1:
+            filelist.append(files[i]) # add element if box is checked 
+    spelist=spelist[spelist['Filenumber'].isin(filelist)]
+    return spelist
+
 def pickelemsGUI(AESquantparams):
     ''' Quick method of interactively selecting elements/lines for plotting 
     has some hard-coded presets that can be changed using preset dictionaries below
@@ -102,6 +167,30 @@ def pickelemsGUI(AESquantparams):
 
 def loadsubfiles():
     ''' Load of standard sub spe files (before combination via averaging from working Auger data directory '''
+    # find and return sub-files (combinable spe files collected in sequence using AutoTool loops)
+    if os.path.isfile('Augerparamlog.csv'):
+        AugerParamLog=pd.read_csv('Augerparamlog.csv', encoding='cp437')
+        logfile=glob.glob('*Auger_log*') # find ... Auger_logbook.
+        subfilenums=[] # list of possible sub files
+        if len(logfile)==1: # found logbook
+            name=logfile[0]
+            if '.xls' in name: # open log tab of existing excel file
+                Augerlogbook=pd.read_excel(name, sheetname='Log')        
+            if '.csv' in name: # open csv
+                Augerlogbook=pd.read_csv(name)
+            combinelist=Augerlogbook[(Augerlogbook['Lastnumber']>0)] # gets file ranges to combine via averaging
+            for index, row in combinelist.iterrows():
+                first=int(combinelist.loc[index]['Filenumber'])
+                last=int(combinelist.loc[index]['Lastnumber'])
+                for i in range(first, last+1):
+                    subfilenums.append(i)
+        subspelist=AugerParamLog[AugerParamLog['Filenumber'].isin(subfilenums)]
+        excludemask=subspelist['Comments'].str.contains('exclude', case=False, na=False)
+        subspelist=subspelist.loc[~excludemask]
+        subspelist=subspelist.sort_values(['Filenumber'], ascending=True)
+    else:
+        print('Augerparamlog and/or Auger logbook not found.')
+        subspelist=pd.DataFrame()
     if os.path.isfile('sub\\Smdifpeakslog_subs.csv'):
         Smdifpeakslogsubs=pd.read_csv('sub\\Smdifpeakslog_subs.csv', encoding='cp437')
     else:
@@ -117,13 +206,14 @@ def loadsubfiles():
     else:
         print('Integquantlogsubs not found.')
         Integquantlogsubs=pd.DataFrame()
-    return Smdifpeakslogsubs, Backfitlogsubs, Integquantlogsubs
-
+    return subspelist, Smdifpeakslogsubs, Backfitlogsubs, Integquantlogsubs
+    
 def loadmainfiles():
     ''' Load of standard files from main Auger data directory '''
     if os.path.isfile('Augerparamlog.csv'):
         AugerParamLog=pd.read_csv('Augerparamlog.csv', encoding='cp437')
-        spelist=AugerParamLog[(AugerParamLog['Areas']>=1)] 
+        AugerParamLog['Comments']=AugerParamLog['Comments'].astype(str) # necessary if all blank/nan
+        spelist=AugerParamLog[(AugerParamLog['Areas']>=1)]
         excludemask=spelist['Comments'].str.contains('exclude', case=False, na=False)
         spelist=spelist.loc[~excludemask]
         spelist=spelist.sort_values(['Filenumber'], ascending=True)
@@ -604,18 +694,6 @@ def removefromlog(df1, df2):
     removal=np.ndarray.tolist(removal)
     df2=df2[-df2.Filename.isin(removal)] # inverse of isin
     return df2
-
-def dropcolumns(df1,df2):
-    ''' Pass two dfs with df2 being the template.. extra unnecessary columns dropped from df1
-    inplace=True modifies both passed and returned df  '''
-    cols1=df1.columns.tolist()
-    cols2=df2.columns.tolist()
-    newdf=df1 # avoids modification of passed df
-    uniquelist=[i for i in cols1 if i not in cols2]
-    for i,colname in enumerate(uniquelist): # remove cols from df1 that are absent from df2
-        # newdf.drop(colname, axis=1, inplace=True) # this modifies both passed and returned dfs
-        newdf=newdf.drop(colname, axis=1)
-    return newdf
     
 def outputduplicates(df, colname):
     '''Pass df and column name to search for duplicates (as string); outputs duplicates to console'''

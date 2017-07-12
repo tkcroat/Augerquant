@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import re, os, glob, sys, csv # already run with functions 
 import pandas as pd
 import numpy as np
-from pylab import *
 import scipy
 import scipy.stats
 from matplotlib.backends.backend_pdf import PdfPages # Only needed for plotting

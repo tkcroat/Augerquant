@@ -12,7 +12,6 @@ Sequential Also would be good to create a loop through all peaks
 """
 #%%
 import matplotlib.pyplot as plt
-from pylab import *
 import numpy as np
 import pandas as pd
 import os

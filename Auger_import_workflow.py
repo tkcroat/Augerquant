@@ -25,7 +25,7 @@ os.chdir('C:\Temp\Auger')
 #%% Load list of all Auger data files (images, spectral maps and spectra)
 
 filelist=glob.glob('*.sem')+glob.glob('*.map')+glob.glob('*.spe')
-filelist=glob.glob('*.spe')
+filelist=glob.glob('*.map')
 
 # Find and read Auger logbook (xls file that contains phrase "Auger_logbook")
 # this file is to associate sample/project names with Auger file numbers and can be used to combine/average multiple spe files
@@ -38,6 +38,9 @@ Auger.checklogfile(filelist, Augerlogbook)
 #%% Main file processing loop for spe, sem and map files (header param extraction/ create csv from binaries)
 # If file in Augerparamlog.csv it won't be reprocessed.. for reprocessing delete filenumber from that log or delete entire log
 AugerParamLog = Auger.Augerbatchimport(filelist, Augerlogbook) # Extract params and process SEM, SPE and MAP files
+# augerparam log is not auto-saved ... 
+# log files are overwritten if they exist by default (but data binaries are not)
+AugerParamLog.to_csv('Augerparamlog.csv',index=False) # save all params to new more complete log file (not autosaved)
 
 spelist=AugerParamLog[(AugerParamLog['Areas']>=1)]  # remove image & map files 
 
@@ -47,10 +50,7 @@ SpatialAreas=pd.read_csv('spatialareaslog.csv') # open automatically created spa
 Auger.makeannotatedjpg(AugerParamLog, SpatialAreas) # makes annotated jpgs for all spe files with prior sem image
 
 # Manually create single annotated image with spatial areas for selected jpg file and spe file
-Auger.annotateone('tr184.209.jpg','tr184.210.csv', SpatialAreas)
-
-# log files are overwritten if they exist by default (but data binaries are not)
-AugerParamLog.to_csv('Augerparamlog.csv',index=False) # save all params to new more complete log file (not autosaved)
+Auger.annotateone('Acfer094.122.jpg','Acfer094.124.csv', SpatialAreas)
 
 # Determine stage drift/pixel shift from pre and post images by filenumber
 shift, error = Auger.findshift(127, 129, AugerParamLog)
@@ -75,8 +75,7 @@ AugerParamLog=AugerParamLog.drop_duplicates(['Filenumber'])
 combinelist=Augerlogbook[(Augerlogbook['Lastnumber']>0)] # gets file ranges to combine via averaging
 
 # Combine consecutive files via averaging, move underlying files to /sub
-AugerParamLog=Auger.combinespeloop(combinelist, AugerParamLog, movefiles=True)
-AugerParamLog=combinespeloop(combinelist, AugerParamLog, movefiles=True)
+AugerParamLog=Auger.combinespeloop(combinelist, AugerParamLog, movefiles=False)
 
 AugerParamLog.to_csv('Augerparamlog.csv',index=False) # save all params to new more complete log file
 

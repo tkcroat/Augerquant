@@ -6,13 +6,221 @@ Created on Fri Dec  2 17:10:19 2016
 """
 import pandas as pd
 import numpy as np
-import shutil, sys, fileinput, os, math
+import shutil, sys, fileinput, os, math, re
 import matplotlib.pyplot as plt
+import struct
 from PIL import Image, ImageDraw, ImageFont # needed for jpg creation
-
+from Auger_batch_import_functions import sortmultiplex, keepbestvals, SpectralRegions
+import glob
+from operator import itemgetter
+from itertools import groupby
 #%%
 
 # Quant map data processing done after normal batch import process (working on csv files)
+
+def getspectralregs(QMpixarray):
+    ''' Retrieve and save multiplex spectral regions from first spe file 
+    saves multiplex details from first spe file to disk; returns spectralregs''' 
+    AugerFileName=QMpixarray.iloc[0]['Filename']
+    filenumber=AugerFileName.split('.')[1].split('.')[0]
+    with open(AugerFileName, 'rb') as file:
+        filedata = file.read()
+    end=filedata.find(b'EOFH')
+    headerdata=filedata[0:end+6] # works to cut off binary part    
+    header=headerdata.decode(encoding='cp437') # more generic encoding than utf-8
+    # get number of cycles and time per step from header
+    tempstring=header.split('NumCycles: ')[1] # find # cycles (works for either survey or multiplex)
+    match=re.search(r'\d+',tempstring)
+    if match:
+        numcycles=int(match.group(0))
+    tempstring=header.split('TimePerStep:')[1] # find time per step
+    match=re.search(r'\d+\.\d+',tempstring) 
+    if match:
+        timestep=float(match.group(0))
+    details, evbreaks, timeperarea, energy, SpectralRegs=SpectralRegions(filenumber, AugerFileName, numcycles, timestep, header)
+    return SpectralRegs
+
+def makeQMarray(QMpixarray, basename):
+    ''' Make 3D numpy array from stack of multiplex spe files (20 areas per file); 
+    pixel position obtained from QMpixarray file
+    in final 3D nparray, X, Y are spatial and Z is signal ... electron counts/sec 
+    from single multiplex scan '''
+    # get energy range for multiplex from first data file (same for all pixels)
+    AugerFileName=QMpixarray.iloc[0]['Filename']
+    energy, evbreaks =getenergyrange(AugerFileName) # Values in original order
+    xmax=QMpixarray.Xindex.max()
+    ymax=QMpixarray.Yindex.max()
+    # make 3D blank numpy array of dimension xmax+1 * ymax+1 * len(energy)
+    specimage=np.empty([xmax+1,ymax+1,len(energy)])
+
+    # Now extract counts from all areas in each multiplex (20 max per spe)
+    spefilelist=np.ndarray.tolist(QMpixarray.Filename.unique())
+    for i, file in enumerate(spefilelist):
+        thisfile=QMpixarray[QMpixarray['Filename']==file]
+        numareas=len(thisfile)
+        thismult=get_multiplex_data(AugerFileName, energy, evbreaks, numareas)
+        for index, row in thisfile.iterrows():
+            xind=thisfile.loc[index]['Xindex']
+            yind=thisfile.loc[index]['Yindex']
+            thiscolnum=thisfile.loc[index]['Subnumber']+1
+            if len(thismult)!=specimage.shape[2]:
+                print('spe spectrum has different length than specimage array!')
+                continue
+            else:
+                specimage[xind, yind,:]=thismult['Counts'+str(thiscolnum)]
+    energy.sort()
+    return specimage, energy
+
+def get_multiplex_data(AugerFileName, energy, evbreaks, numareas):
+    ''' Function to extract and return all areas withing multiplex spe file 
+    data is sorted by energy
+    list of energy values are passed from SpectralRegions function (energy x values are not continuous for multiplex)
+    bindata is rest of binary after text header extraction
+	 evbreaks are index# of boundaries between spectral regions 
+    energy is list of ev values and corresponding index within specimage (element in list) 
+    '''
+    with open(AugerFileName, 'rb') as file:
+        filedata = file.read()
+    end=filedata.find(b'EOFH')
+    bindata=filedata[end+6:] # binary data section of file (header removed)
+    mystruct=struct.Struct('f')
+    # binary header of variable length.. just count backward using known data length
+    startbyte=len(bindata)-4*numareas*len(energy)
+    
+    # TEST for correct byte location... data regions begins right after last occurence of triple zero 4 byte float values.. for survey usually found in bytes 100:111 
+    for i in range(startbyte-12,startbyte,4):
+        byteval=bindata[i:i+4]
+        unpackbyte=mystruct.unpack(byteval) # little endian encoding
+        if unpackbyte[0]!=0:
+            print('Possible binary read error... leading zeros are missing for ',AugerFileName)
+
+    # create data frame for multiplex and assign energy values   
+    multiplex=pd.DataFrame() # data frame for energy, and counts col for each area   
+    multiplex['Energy']=energy # energy values found in SpectralRegions and passed as argument
+    
+    # Read in and convert all numeric values
+    alldata=[] # single list for all Auger counts values in file
+    for i in range(startbyte,len(bindata),4):
+        byteval=bindata[i:i+4]
+        unpackbyte=mystruct.unpack(byteval)
+        alldata.append(unpackbyte[0])
+    
+    if len(alldata)!=len(energy)*numareas: # number of data values expected for each area
+        print('Possible binary data reading error: Data string length does not match expected value for ',AugerFileName)
+    # multiplex file structure has same energy region of all areas bundled together (split counts into spectral regions based on evbreaks)
+    # so organization is multiplex spectral region 1 (all areas), spectral region 2 (all areas), etc.  
+    datachunks=[]
+    for i in range(0,len(evbreaks)-1):
+        datachunks.append(evbreaks[i+1]-evbreaks[i])
+    datachunks[0]=datachunks[0]+1 # adjust for length of first regions
+    datachunks=[i*numareas for i in datachunks] # total lengths of each spectral region
+    databoundaries=[]
+    for i,val in enumerate(datachunks):
+        temp=datachunks[0:i]
+        databoundaries.append(sum(temp))
+    databoundaries.append(sum(datachunks))
+    specregs=[] # list of lists containing counts values for each spectral region
+    # now split data into single spectral region with all spatial areas
+    for i in range(0,len(databoundaries)-1):
+        specregs.append(alldata[databoundaries[i]:databoundaries[i+1]])
+    # Now construct counts for each area
+    counts=[[] for x in range(0,numareas)] # list of empty lists one for each spatial area
+    
+    for i,vals in enumerate(specregs):
+        # vals is list of count values for this spectral region (for each spatial area back to back)
+        numvals=int(datachunks[i]/numareas) # number of values in single area/single spectral region    
+        for j in range(0, numareas):
+            counts[j].extend(vals[j*numvals:(j+1)*numvals]) # gets all counts columns
+    for i in range(1,numareas+1):
+        cntsname='Counts'+str(i) # name for nth column is counts2, counts3, etc.
+        multiplex[cntsname]=counts[i-1] # assign counts to frame (and switch from 0 based indexing)
+    # solve multiplex out of order problem
+    if not pd.algos.is_lexsorted([multiplex.Energy.values]): # energy values out of order problem
+        multiplex=multiplex.sort_values(['Energy'])
+    return multiplex
+
+def loadQMpixarray():
+    ''' Load of standard files from main Auger data directory '''
+    pixfiles=glob.glob('*pixarray*')
+    if len(pixfiles)==1:
+        QMpixarray=pd.read_csv(pixfiles[0])
+        if 'Filename' not in QMpixarray:
+            print('spe data file names not yet linked with quantmap pixel array.')
+    else:
+        print("Couldn't locate single pixarray definition file")
+    return QMpixarray
+
+def linkfilename(QMpixarray, basename, startnum=101):
+    ''' Link multiplex spe data file names to associated pixel in quant map,
+    startnum is filenumber of first spe; also checks data directory for these filenumbers '''
+    if 'Filename' not in QMpixarray:
+        QMpixarray['Filename']=''
+    for index,row in QMpixarray.iterrows():
+        QMpixarray=QMpixarray.set_value(index, 'Filename',basename+'.'+str(startnum+index//20)+'.spe')
+    # Check for existence of data against list of generated names
+    spefiles=np.ndarray.tolist(QMpixarray.Filename.unique())
+    datafiles=glob.glob('*.spe')
+    missing=[f for f in spefiles if f not in datafiles]  
+    if len(missing)!=0:
+        franges=[] # ranges of files for missing file output
+        for key, group in groupby(enumerate(missing), lambda x: x[0]-x[1]):
+            thisgroup=list(map(itemgetter(1), group))
+            if len(thisgroup)>1:
+                # more than one consecutive so group as min-max in frange
+                franges.append(str(min(thisgroup))+'-'+ str(max(thisgroup)))
+            else:
+                franges.append(str(thisgroup[0])) # single non-consecutive filenumber
+        print('Multiplex spe files in Qmpixarray missing from data directory.')
+        print('Filenumbers ',', '.join(franges),' are missing.')
+    return QMpixarray
+
+def getenergyrange(AugerFileName):
+    ''' Get xrange for QM multiplex (should be basically identical for all )
+    if multiplex energy range out of order, then rearranged later (evbreaks needed) 
+    pulled from processAuger
+    energy is list of eV values (and index of list is same index in specimage
+    elements
+    '''
+  
+    with open(AugerFileName, 'rb') as file:
+        filedata = file.read()
+    end=filedata.find(b'EOFH')
+    headerdata=filedata[0:end+6] # works to cut off binary part    
+    header=headerdata.decode(encoding='cp437') # more generic encoding than utf-8
+    # Stripped down version of SpectralRegions function from Auger import
+    tempstring=header.split('NoSpectralReg: ')[1] # unlike NoSpectralRegFull inactives are already removed
+    match=re.search(r'\d+',tempstring)
+    numdefregions=int(match.group(0)) # number of defined regions (can be larger than # active regions)
+    energy=[] # list for energy x values
+    evbreaks=[0] # region boundaries needed for smoothdiff include first
+    for i in range(numdefregions):
+        tempstr=tempstring.split('SpectralRegDef: ')[i+1] # should work to split 
+        numpts=int(tempstr.split(' ')[4])   
+        evstep=float(tempstr.split(' ')[5]) #eV/step        
+        startev=float(tempstr.split(' ')[6]) # starting eV
+        for j in range(0,numpts): # generate energy values for survey
+            energy.append(startev+evstep*j)
+        evbreaks.append(len(energy)-1) # gives indices of discontinuities in energy scan (needed for smoothdiffS7D7)   
+    return energy, evbreaks
+  
+def showQMregion(jpgfname, margin, AugerParamLog):
+    ''' Indicate mapped region for quant map on jpg overlay
+    get mag from paramlog and then scale for 1cm = 1 micron '''
+    try:
+        jpgimage=Image.open(jpgfname)
+        draw=ImageDraw.Draw(jpgimage) # single draw instance to label above image
+        draw.rectangle((512*margin,512*margin,512*(1-margin),512*(1-margin)), outline='red') # red rectangle at specified position
+        annotjpgname=jpgfname.replace('.jpg','_map.jpg')
+        # Find field of view from AugerParamLog
+        match=AugerParamLog[AugerParamLog['Filename']==jpgfname.replace('.jpg','.sem')]
+        if len(match==1):
+            fieldofview=match.iloc[0]['FieldofView']
+        thisdpi=(int((512*2.54)/(fieldofview)),int((512*2.54)/(fieldofview))) 
+        jpgimage.convert('RGB').save(annotjpgname, dpi=thisdpi)
+        jpgimage.close()
+    except:
+        print('Problem creating jpg with overlaid map region for', jpgfname)
+    return 
 
 def plotmaps(elementmaps, Elements, savename=''):
     ''' Plot arbitrary number of element maps (passed as list of numpy arrays) into single figure '''
@@ -270,24 +478,42 @@ def writeautotool(df, autotoolname):
         sys.stdout.write(datastr)
     return
 
-def makeautotool(filelist, multacq='C:\\Temp\\QM_multiplex.phi'):
-    '''Generates df with Autotool commands and data values (for generating Autotool phi file)'''
+def makeautotool(filelist, multacq='C:\\Temp\\QM_multiplex.phi', **kwargs):
+    '''Generates df with Autotool commands and data values (for generating Autotool phi file)
+    7/10 Modified with image reg insertion 
+    kwarg: imageregint - interval for insertion of image registrations  '''
     df=pd.read_csv('C:\\Users\\tkc\\Documents\\Python_Scripts\\Utilities\\QM_autotool.csv')
     atframe=df.loc[0:2]
+    end=df.loc[3:4] # final image and beam deflection
     # filelist.sort(reverse=True) # sort just screws things up
     mycolumns=['Command','Data']
-    for i, file in enumerate(filelist):        
-        newrow=pd.DataFrame(index=np.arange(0,2), columns=mycolumns)
-        newrow=newrow.set_value(0,'Command','AES:Load Area Define Setting...')
-        newrow=newrow.set_value(0,'Data','C:\\Temp\\'+file)
-        newrow=newrow.set_value(1,'Command','AES:Multiplex Acquire')
+    if 'imageregint' in kwargs:
+        regint=kwargs.get('imageregint',1)
+    for i, file in enumerate(filelist):
+        if i%regint!=0: # no image reg this cycle 
+            # create double rowed frame
+            newrow=pd.DataFrame(index=np.arange(0,2), columns=mycolumns)
+            newrow=newrow.set_value(0,'Command','AES:Load Area Define Setting...')
+            newrow=newrow.set_value(0,'Data','C:\\Temp\\'+file)
+            newrow=newrow.set_value(1,'Command','AES:Multiplex Acquire')
+        else:
+            newrow=pd.DataFrame(index=np.arange(0,3), columns=mycolumns)
+            newrow=newrow.set_value(0,'Command','AES:Load Area Define Setting...')
+            newrow=newrow.set_value(0,'Data','C:\\Temp\\'+file)
+            newrow=newrow.set_value(1,'Command','AES:Multiplex Acquire')
+            newrow=newrow.set_value(2,'Command','AES:Register Image')
         atframe=pd.concat([atframe,newrow], ignore_index=True)
+    atframe=pd.concat([atframe,df.loc[[3]]], ignore_index=True)
     atframe=pd.concat([atframe,df.loc[[3]]], ignore_index=True)
     return atframe
 
-def makesquarearray(margin, arraysize, basename):
+def makesquarearray(margin, arraysize, basename, **kwargs):
     ''' Divide up 512x512 pixels in map into n areas and format correctly for spatial areas phi files
-    (which are loaded using Autotool loops into PHI Smartsoft); margin is % of field to skip mapping if desired '''
+    (which are loaded using Autotool loops into PHI Smartsoft); margin is % of field to skip mapping 
+    if desired 
+    kwargs: imageregint - interval at which to build in image registration into autotool loop; val of 1 means
+        register every 20 pixels (since each area file holds 20 defined spatial areas);  passed to makeautotool
+    '''
     pix=512
     width=(pix*(1-margin)/arraysize) # exact width (height is same)
     startxy=int(pix*margin/2) # split margin between top/bottom, left/right
@@ -319,7 +545,7 @@ def makesquarearray(margin, arraysize, basename):
     for i, fname in enumerate(filelist):
         thisfile=square[square['PHIname']==fname]
         writeAESareas(thisfile, fname) # writes each list of 25 areas to separate .phi text file
-    atframe=makeautotool(filelist, multacq='QM_multiplex')
+    atframe=makeautotool(filelist, multacq='QM_multiplex', **kwargs)
     # instead of C:\Temp copy multiplex and spatial areas files to Smartsoft settings folders
     return square, atframe
 

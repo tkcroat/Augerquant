@@ -11,6 +11,8 @@ import numpy as np # needed for image arrays
 # no need to clean or find/replace from .spe or .sem file headers (mostly : delimited)
 from math import factorial
 from skimage.feature import register_translation
+from operator import itemgetter
+from itertools import groupby
 
 def findshift(imagenum1, imagenum2, paramlog):
     ''' Pass pre and post- images, determine stage drift in microns and any uncorrected pixel shift and print it
@@ -278,8 +280,7 @@ def autocombinespe(AugerParamLog):
         if str(AugerParamLog.loc[index]['Comments'])=='nan':
             AugerParamLog=AugerParamLog.set_value(index,'Comments','')
     # generate list of combinable files (same basename)
-    basenamelist=AugerParamLog.Basename.unique()
-    basenamelist=np.ndarray.tolist(basenamelist) # list of unique base names
+    basenamelist=np.ndarray.tolist(AugerParamLog.Basename.unique()) # list of unique base names
     for i, bname in enumerate(basenamelist): # loop through each combinable basename
         logmatches=AugerParamLog[AugerParamLog['Basename']==bname]
         excludemask=logmatches['Comments'].str.contains('avg', case=False, na=False)
@@ -294,34 +295,29 @@ def autocombinespe(AugerParamLog):
                 if len(xmatches)==1: # single file and thus not combinable
                     continue
                 # ensure all have same number of areas (true for combinable spectra made with Autotool loops)
-                xmatches=xmatches[(xmatches['Areas']>=1)] # convenient way to drop .sem and .map 
+                xmatches=xmatches[pd.notnull(xmatches['Areas'])] # drops map and sem files 
                 if len(xmatches.Areas.unique())!=1:
                     print('Different # of areas for spectra', bname, str(xmatches.Filenumber.min()),' to ', str(xmatches.Filenumber.min()))
                     continue
-                # TODO fix this check if filenumbers are consecutive (true for Autotool)
-                '''
-                from operator import itemgetter
-                from itertools import groupby                
-                filenums=xmatches.Filenumber.unique()
-                filenums=np.ndarray.tolist(filenums)
-                for key, group in groupby(enumerate(filenums), lambda x: x[0]-x[1]):
-                    print(group)
-                    mygroup = map(itemgetter(1), group)
-                    print (map(itemgetter(1),group))
-                '''
-                # now ready to combine this set of files
-                firstnum=xmatches.Filenumber.min() # assumes consecutive file numbering w/ Autotool
-                lastnum=xmatches.Filenumber.max()
-                csvname=bname+str(firstnum)+str(lastnum)+'.csv' # string for combined file based on first-last filenumber
-                if not os.path.isfile(csvname):  # skip combined file creation if it already exists (however log is still regenerated)    
-                    avgcombinespe(xmatches,csvname) # combines above files and makes new averaged csv 
-                    print('Average-combined Auger spectra ', csvname, ' created.')
-                    # make new entry for Augerparamlog  
-                    avgentry = avglogentry(xmatches) # create new logbook entry (series) for averaged spectrum (mostly from firstfile's info)
-                    # append new Series entry to end of AugerParamLog
-                    AugerParamLog=AugerParamLog.append(avgentry, ignore_index=True)
-                else:
-                    print(csvname,' already exists')
+                # Only combine consecutive ranges of filenumbers
+                filenums=np.ndarray.tolist(xmatches.Filenumber.unique())
+                # Method of grouping into consecutive ranges 
+                for key, group in groupby(enumerate(filenums), lambda i: i[0]- i[1]): 
+                    group = list(map(itemgetter(1), group))
+                    if len(group)>1:
+                        firstnum=min(group)
+                        lastnum=max(group)
+                        csvname=bname+'.'+str(firstnum)+str(lastnum)+'.csv' # string for combined file based on first-last filenumber
+                        if not os.path.isfile(csvname):  # skip combined file creation if it already exists (however log is still regenerated)    
+                            thismatch=xmatches[xmatches['Filenumber'].isin(group)]
+                            avgcombinespe(thismatch,csvname) # combines above files and makes new averaged csv 
+                            print('Average-combined Auger spectra ', csvname, ' created.')
+                            # make new entry for Augerparamlog  
+                            avgentry = avglogentry(thismatch) # create new logbook entry (series) for averaged spectrum (mostly from firstfile's info)
+                            # append new Series entry to end of AugerParamLog
+                            AugerParamLog=AugerParamLog.append(avgentry, ignore_index=True)
+                        else:
+                            print(csvname,' already exists')
     return AugerParamLog
     
 def combinespelist(filelist, AugerParamLog, csvname='', movefiles=False):
@@ -860,7 +856,7 @@ def makejpg(bindata, jpgname, resolution, fieldofview):
     imagearray=np.array(intensity).reshape(resolution,resolution) # create numpy image array (typically 52x512)
     imagearray=np.rot90(imagearray, k=3) # rotate by 90CW
     imagearray=np.fliplr(imagearray) # flip horizontal
-    # testable with imshow(imagearray) after pylab import
+    # testable with imshow(imagearray)
     img=Image.fromarray(imagearray) # convert numpy array to PIL format
     thisdpi=(int((512*2.54)/(fieldofview)),int((512*2.54)/(fieldofview))) # set dpi tuple based on field of view (so that 10micron image measures 10cm)
     img.convert('RGB').save(jpgname,dpi=thisdpi) # convert to RGB format and save at appropriate resolution
@@ -892,7 +888,7 @@ def makemaps(bindata, jpgbasename, resolution, fieldofview, mapelements):
         imagearray=np.array(tempint).reshape(resolution,resolution) # create numpy image array (typically 52x512)
         imagearray=np.rot90(imagearray, k=3) # rotate by 90CW
         imagearray=np.fliplr(imagearray) # flip horizontal
-        # testable with imshow(imagearray) after pylab import
+        # testable with imshow(imagearray)
         img=Image.fromarray(imagearray) # convert numpy array to PIL format    
         img.convert('RGB').save(jpgbasename+'_'+elem+'.jpg',dpi=thisdpi) # convert to RGB format and save at appropriate resolution
         

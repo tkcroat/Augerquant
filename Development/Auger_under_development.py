@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import re, os, glob, sys, csv # already run with functions 
 import pandas as pd
 import numpy as np
-from pylab import *
 import scipy
 import scipy.stats
 from matplotlib.backends.backend_pdf import PdfPages # Only needed for plotting
@@ -17,10 +16,17 @@ from collections import defaultdict
 from math import factorial # used by Savgol matrix
 from PIL import Image, ImageDraw, ImageFont # needed for jpg creation
 import datetime
-
+import tkinter as tk
 import statsmodels.formula.api as smf # has OLS module with convenient outliers tests
 #%%
-                
+
+AESplot.AESplot1('140-144', spelist, AESquantparams, **kwargs) 
+
+''' TESTING
+files='111-115'
+areas='1'
+'''
+
 def packagequant():
     ''' Write backfit, integ, smdiff, AESquantparams to single Excel file '''
     

@@ -627,15 +627,18 @@ def smdifbatchquant(spelist, Elements, AESquantparams, reprocess=False, Backregs
             print ('File ', filename, 'not found.')
             continue
         if reprocess==False: # check if already present in smdiflog, if so skip reprocessing
-            match=Smdifpeakslog[Smdifpeakslog['Filename']==filename]
-            if len(match)!=0:
-                priorelem=np.ndarray.tolist(match.PeakID.unique())
-                missingelems=[elem for elem in Elements if elem not in priorelem]
-                print('Entire file ', filename, 'skipped/already processed... ensure same AESquantparams ')
-                if len(missingelems)>0:
-                    missingstr=",".join(missingelems)
-                    print('Elements ', missingstr, ' not processed for ', filename)
-                continue # skip entire spe file on the assumption that it's already been processed
+            try:
+                match=Smdifpeakslog[Smdifpeakslog['Filename']==filename]
+                if len(match)!=0:
+                    priorelem=np.ndarray.tolist(match.PeakID.unique())
+                    missingelems=[elem for elem in Elements if elem not in priorelem]
+                    print('Entire file ', filename, 'skipped/already processed... ensure same AESquantparams ')
+                    if len(missingelems)>0:
+                        missingstr=",".join(missingelems)
+                        print('Elements ', missingstr, ' not processed for ', filename)
+                    continue # skip entire spe file on the assumption that it's already been processed
+            except: # handles empty dataframe problem (no prior run)
+                pass
         # Elemdata has index #s of ideal positions for this energy list
         Elemdata, Backregdata=findindices(Elements,Backregs, logmatch, AESquantparams) # passes ideal position
         if len(Elemdata)==0:

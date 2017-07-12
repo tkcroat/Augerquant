@@ -1067,3 +1067,376 @@ def reportcountsback(paramlog, plotelems, AESquantparams, plotback=True, PDFname
                 pdf.savefig(fig)
                 plt.close('all') # close all open figures
     return
+
+def setplotrange(plotrange, Augerfile):
+    ''' Set range of plot based on element, numerical range or default to max range of spectrum  
+    commonly called by Auger plot functions below
+    LEGACY .. .replaced by getplotboundaries'''
+    if '-' in plotrange: # determine range for plot
+        myplotrange=(int(plotrange.split('-')[0]),int(plotrange.split('-')[1]))
+    elif plotrange=='C':
+        myplotrange=(236,316)  
+    elif plotrange=='Ca':
+        myplotrange=(236,336)   
+    elif plotrange=='O':
+        myplotrange=(470,540)
+    elif plotrange=='Fe':
+        myplotrange=(560,747)  
+    elif plotrange=='Mg':
+        myplotrange=(1145,1225)
+    elif plotrange=='Al':
+        myplotrange=(1350,1430)
+    elif plotrange=='Si':
+        myplotrange=(1570,1650)
+    else: # defaults to full data range
+        lower=Augerfile.Energy.min()        
+        upper=Augerfile.Energy.max()
+        myplotrange=(lower, upper)
+    return myplotrange
+
+# old version of countsbackreport before using tk interface for args/kwargs
+def reportcountsback(paramlog, plotelems, AESquantparams, backfitdf=False, PDFname='countsback_report.pdf'):
+    ''' Plot of list of passed elements 
+    pass list of files and selected background regions from automated fitting
+    background fits themselves stored with auger csv files
+    optional pass of backfitlog (w/ points defining region boundary for background fitting useful for troubleshooting fits)
+    evbreaks from multiplex plotted as red lines (often different dwell times for different elements)
+    plotback switch -- whether or not to plot 
+    '''
+    plt.ioff()
+    with PdfPages(PDFname) as pdf:
+        for index,row in paramlog.iterrows(): # iterrows avoids reindexing problems
+            AugerFileName=paramlog.loc[index]['Filename']
+            numareas=int(paramlog.loc[index]['Areas'])            
+            try:
+                Augerfile=pd.read_csv(AugerFileName) # reads entire spectra into df (all areas)
+            except:
+                print(AugerFileName,' skipped ... not found.')
+                continue
+            Params=paramlog.loc[index] # grab row for this spe file as Series
+            # filenumber=Params.Filenumber # retrieve filenumber            
+            energyvals=findevbreaks(Params, Augerfile) # get x energy vals for evbreaks in this multiplex (if they exist) as float
+            # determine size of plot for this filenumber (same for all areas)
+            plotranges=getplotboundaries(Augerfile, plotelems, AESquantparams) # returns plot ranges for all regions with data from plotelems
+            # boundaries of backfit range from backfitlog are helpful for plotting(lower1 & 2 and upper 1&2 which are index #s) 
+            if type(backfitdf)==pd.core.frame.DataFrame:
+                thisfilebackpts=backfitdf[backfitdf['Filename']==AugerFileName]
+                plotbackpts=True
+            else:
+                plotbackpts=False
+            for i in range(0,numareas): # create separate plot page for each area 
+                areanum=i+1
+                if plotbackpts==True: # this gets all the lower1, lower2, upper1, upper2 index point boundaries
+                    indexptslist=[]
+                    thisareabackpts=thisfilebackpts[(thisfilebackpts['Areanumber']==areanum)] # get subset of peaks for this area number 
+                    thisarr=thisareabackpts.Lower1.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    thisarr=thisareabackpts.Lower2.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    thisarr=thisareabackpts.Upper1.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    thisarr=thisareabackpts.Upper2.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    indexptslist=[int(i) for i in indexptslist] # make sure all index #s are ints 
+                    indexptslist.sort()
+                # set plot row and column for this element range (from plotelems -- plotranges)
+                if len(plotranges)==1:
+                    numcols=1
+                    numrows=1
+                else:
+                    numcols=2 # 
+                    numrows=math.ceil(len(plotranges)/2)
+                # new plot for each spatial area
+                try:
+                    fig, axes = plt.subplots(nrows=numrows, ncols=numcols, figsize=(16,9), squeeze=False) # 2 by 3 axes array
+                    colname='Counts'+str(areanum)
+                    mytitle=AugerFileName +' area #'+str(areanum)
+                    plt.suptitle(mytitle)
+                    # now loop over the elemental plot ranges
+                    for j, bounds in enumerate(plotranges):
+                        [lower, upper]=bounds                    
+                        thisrow=j%numrows
+                        thiscol=j//numrows
+                        axindex=thisrow, thiscol
+                        Augerslice=Augerfile[(Augerfile['Energy']>=lower) & (Augerfile['Energy']<=upper)] # already known that this isn't empty
+                        Augerslice.plot(x='Energy', y=colname, ax=axes[axindex]) # plot counts
+                        if plotbackpts==True:
+                            # Now add scatter plot points at fit region boundaries
+                            backpts=Augerslice[Augerslice.index.isin(indexptslist)] # gets background fitted pts but only from this data slice
+                            if not backpts.empty: # show fitted pts from counts
+                                backpts.plot.scatter(x='Energy', y=colname, ax=axes[axindex])
+                            backname='Backfit'+str(areanum) # don't need separate empty test since df already checked for empty in getplotboundaries
+                            Augerslice.plot(x='Energy', y=backname, ax=axes[thisrow,thiscol]) 
+                            
+                        # Section for labeling plotelements
+                        elemlines=getelemenergy(plotelems, bounds, AESquantparams, deriv=False) # can pass plot range as lower,upper tuple
+                        # list of tuples with energy,elemname
+                        for k, elemtuple in enumerate(elemlines):
+                            # elemtuple[0] is energy and [1] is element symbol
+                            # axes[thisrow,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                            try:
+                                axes[axindex].axvline(x=elemtuple[0], color='b') # O line
+                                yval=(Augerslice[colname].max()-Augerslice[colname].min())*0.9+Augerslice[colname].min()
+                                axes[thisrow,thiscol].text(elemtuple[0],yval, elemtuple[1],rotation=90, fontsize=18) # use standard -250 y val 
+                            except:
+                                print('Problem labeling elements')
+                            # fold 
+                        # add red vertical lines at multiplex energy breaks 
+                        for l, val in enumerate(energyvals):
+                            if val > lower and val < upper: 
+                                axes[thisrow,thiscol].axvline(x=val, color='r') # on counts plot 
+                    for subplt in range(0,numrows*numcols): # hide any empty subplots
+                        if subplt>len(plotranges)-1:
+                            axes[subplt%numrows,subplt//numrows].set_visible(False)
+                    pdf.savefig(fig)
+                    plt.close(fig) # closes recently displayed figure (since it's saved in PDF report)
+                    print(AugerFileName,' area', areanum, 'plotted') # end of long try plotting entire area
+                except:
+                    print('Problem plotting file ', AugerFileName, 'area', areanum, ' likely no data for specified elements.')
+    plt.ion()
+    return
+
+# Old way with cloned filenumber areanumber rows in paramlog
+def reportderivcnt(paramlog, plotelems, AESquantparams, **kwargs):
+    ''' Comparison plots for both derivative and counts itself (don't have to worry about axes w/o indexing)
+    plots selected filenumber + areanumber
+    plots all spe files, associated quant points, and labels selected elemental lines
+    Kwargs:   both backfitlog (key bfl) and smdiflogs (key smd) are optional kwarg params 
+    pdf rename is also custom (defaults to derivcnts_report_3Mar17)
+    
+    '''
+    plt.ioff()
+    now=datetime.datetime.today()
+    # Set up default PDF name (custom name is passable via kwargs)
+    fname='Derivcnt_report_'+now.strftime('%d%b%y')+'.pdf'
+    PDFname=kwargs.get('PDFname',fname)
+    with PdfPages(PDFname) as pdf:
+        for index,row in paramlog.iterrows():
+            AugerFileName=paramlog.loc[index]['Filename']
+            areanum=int(paramlog.loc[index]['Areanumber'])  
+            Augerfile=openspefile(AugerFileName)
+            if Augerfile.empty: # file not found problem
+                continue
+            # myplotrange=(Augerfile['Energy'].min(),Augerfile['Energy'].max()) # same range for all areas in spe            
+            if 'smd' in kwargs:  
+                Smdifdf=kwargs.get('smd','')
+                # retrieve assoc. subset of peaks data
+                thisfilepeaks=Smdifdf[(Smdifdf['Filename']==AugerFileName)&(Smdifdf['Areanumber']==areanum)] 
+            # SKIP energyvals=findevbreaks(Params, Augerfile) # get x energy vals for evbreaks in multiplex
+            # determine size of plot for this filenumber (same for all areas)
+            # plotranges fnct sometimes combines certain plotelems (i.e. C and Ca together)
+            plotranges=getplotboundaries(Augerfile, plotelems, AESquantparams) # returns plot ranges for all regions with data from plotelems
+            # set plot rows and columns
+            numrows=2
+            numcols=len(plotranges)
+            # for plotting background fit points used in integral method
+            if 'bfl' in kwargs:  
+                backfitdf=kwargs.get('bfl','')
+                thisfilebackpts=backfitdf[(backfitdf['Filename']==AugerFileName) & (backfitdf['Areanumber']==areanum)]
+                indexptslist=[] # this gets all the lower1, lower2, upper1, upper2 index point boundaries
+                thisarr=thisfilebackpts.Lower1.unique()
+                thislist=np.ndarray.tolist(thisarr)
+                indexptslist.extend(thislist)
+                thisarr=thisfilebackpts.Lower2.unique()
+                thislist=np.ndarray.tolist(thisarr)
+                indexptslist.extend(thislist)
+                thisarr=thisfilebackpts.Upper1.unique()
+                thislist=np.ndarray.tolist(thisarr)
+                indexptslist.extend(thislist)
+                thisarr=thisfilebackpts.Upper2.unique()
+                thislist=np.ndarray.tolist(thisarr)
+                indexptslist.extend(thislist)
+                indexptslist=[int(i) for i in indexptslist] 
+                indexptslist.sort()
+            try:
+                fig, axes = plt.subplots(nrows=numrows, ncols=numcols, figsize=(16,9), squeeze=False) # 2 by ? axes array
+                mytitle=AugerFileName.replace('.csv','') +' area #'+str(areanum)                
+                plt.suptitle(mytitle)
+                for j, bounds in enumerate(plotranges):
+                    [lower, upper]=bounds                    
+                    thiscol=j
+                    # Augerslice already checked for empty set 
+                    Augerslice=Augerfile[(Augerfile['Energy']>lower) & (Augerfile['Energy']<upper)]
+                    Augerslice.plot(x='Energy', y='S7D7'+str(areanum), ax=axes[0,thiscol]) # deriv in upper plot
+                    Augerslice.plot(x='Energy', y='Counts'+str(areanum), ax=axes[1,thiscol]) # counts in lower 
+                    # Section for labeling plotelements (plot range is passable as lower, upper tuple)
+                    elemlines=getelemenergy(plotelems, bounds, AESquantparams, deriv=True) 
+                    # list of tuples with energy,elemname
+                    for k, elemtuple in enumerate(elemlines):
+                        # elemtuple[0] is energy and [1] is element symbol
+                        try:
+                            axes[0,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                            axes[0,thiscol].text(elemtuple[0],-250, elemtuple[1],rotation=90, fontsize=18) # use standard -250 y val 
+                        except:
+                            print('Problem labeling elements')
+                    # Section for adding smooth-diff quant data (optional via kwarg)
+                    if kwargs.get('addsmdif',False):        
+                        plotpts=thisfilepeaks[(thisfilepeaks['Peakenergy']>lower) & (thisfilepeaks['Peakenergy']<upper)]
+                        if not plotpts.empty:
+                            try:
+                                plotpts.plot.scatter(x='Peakenergy', y='Negintensity', ax=axes[0,thiscol], color='r')
+                                plotpts.plot.scatter(x='Pospeak', y='Posintensity', ax=axes[0,thiscol], color='r')                                        
+                                titlestring=maketitlestring(plotpts)
+                                axes[0,thiscol].set_title(titlestring, fontsize=10)
+                            except:
+                                print('Problem adding points from smdif quant calcs for ', AugerFileName,'area # ', areanum )
+                    # add red vert line at multiplex energy break if present
+                    # removed... however evbreaks could be retrieved from AugerParamLog if desired
+                    '''
+                    for l, val in enumerate(energyvals):
+                        if val > lower and val < upper: 
+                            axes[0,thiscol].axvline(x=val, color='r') # on deriv plot
+                            axes[1,thiscol].axvline(x=val, color='r') # on counts plot 
+                    '''
+                    # Now plot counts and background fits in bottom row
+                    if 'bfl' in kwargs: # flag to show points from which background was determined 
+                        # Now add scatter plot points at fit region boundaries
+                        backpts=Augerslice[Augerslice.index.isin(indexptslist)] # gets background fitted pts but only from this data slice
+                        if not backpts.empty: # show fitted pts from counts
+                            backpts.plot.scatter(x='Energy', y='Counts'+str(areanum), ax=axes[1,thiscol])
+                        Augerslice.plot(x='Energy', y='Backfit'+str(areanum), ax=axes[1,thiscol]) 
+                    # now label elements for counts plot
+                    elemlines=getelemenergy(plotelems, bounds, AESquantparams, deriv=False) # can pass plot range as lower,upper tuple
+                    # list of tuples with energy,elemname
+                    for k, elemtuple in enumerate(elemlines):
+                        # elemtuple[0] is energy and [1] is element symbol
+                        # axes[thisrow,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                        try:
+                            axes[1,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                            yval=(Augerslice['Counts'+str(areanum)].max()-Augerslice['Counts'+str(areanum)].min())*0.9+Augerslice['Counts'+str(areanum)].min()
+                            axes[1,thiscol].text(elemtuple[0],yval, elemtuple[1],rotation=90, fontsize=18) # use standard -250 y val 
+                        except:
+                            print('Problem labeling elements') 
+                pdf.savefig(fig)
+                plt.close(fig)
+            except:
+                print('Unknown problem plotting', AugerFileName,' area #', areanum)
+    plt.ion()
+    return
+
+def reportderivcntall(paramlog,  plotelems, AESquantparams, Smdifdf=False, backfitdf=False, PDFname='this_report.pdf'):
+    ''' Comparison plots for both derivative and counts itself (don't have to worry about axes w/o indexing)
+    plots selected filenumber for all area (looped)
+    plots all spe files, associated quant points, and labels selected elemental lines
+    '''
+    plt.ioff()
+    with PdfPages(PDFname) as pdf:
+        for index,row in paramlog.iterrows():
+            AugerFileName=paramlog.loc[index]['Filename']
+            numareas=int(paramlog.loc[index]['Areas'])
+            Augerfile=openspefile(AugerFileName)
+            if Augerfile.empty:
+                continue
+            # myplotrange=(Augerfile['Energy'].min(),Augerfile['Energy'].max()) # same range for all areas in spe            
+
+            if type(Smdifdf)==pd.core.frame.DataFrame:
+                addsmdif=True # flag to plot sm-diff quant points 
+                thisfilepeaks=Smdifdf[Smdifdf['Filename']==AugerFileName] # retrieve assoc. subset of peaks data
+            # SKIP energyvals=findevbreaks(Params, Augerfile) # get x energy vals for evbreaks in this multiplex (if they exist) as float
+            # determine size of plot for this filenumber (same for all areas); plotranges combines some plotelems (i.e. C and Ca together)
+            plotranges=getplotboundaries(Augerfile, plotelems, AESquantparams) # returns plot ranges for all regions with data from plotelems
+            for i in range(0,numareas):
+                areanum=i+1
+                
+                # set plot rows and columns
+                numrows=2
+                numcols=len(plotranges)
+                if type(backfitdf)==pd.core.frame.DataFrame: # for plotting background fit points integral method
+                    thisfilebackpts=backfitdf[(backfitdf['Filename']==AugerFileName) & (backfitdf['Areanumber']==areanum)]
+                    plotbackpts=True
+                    indexptslist=[] # this gets all the lower1, lower2, upper1, upper2 index point boundaries
+                    thisarr=thisfilebackpts.Lower1.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    thisarr=thisfilebackpts.Lower2.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    thisarr=thisfilebackpts.Upper1.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    thisarr=thisfilebackpts.Upper2.unique()
+                    thislist=np.ndarray.tolist(thisarr)
+                    indexptslist.extend(thislist)
+                    indexptslist=[int(i) for i in indexptslist]
+                    indexptslist.sort()
+                else:
+                    plotbackpts=False
+                try:
+                    fig, axes = plt.subplots(nrows=numrows, ncols=numcols, figsize=(16,9), squeeze=False) # 2 by ? axes array
+                    mytitle=AugerFileName.replace('.csv','') +' area #'+str(areanum)                
+                    if len(plotranges)>4:
+                        plt.tight_layout() # shrinks to fit axis labels
+                    plt.suptitle(mytitle)
+                    for j, bounds in enumerate(plotranges):
+                        [lower, upper]=bounds                    
+                        thiscol=j
+                        Augerslice=Augerfile[(Augerfile['Energy']>lower) & (Augerfile['Energy']<upper)] # already known that this isn't empty
+                        Augerslice.plot(x='Energy', y='S7D7'+str(areanum), ax=axes[0,thiscol]) # deriv in upper plot
+                        Augerslice.plot(x='Energy', y='Counts'+str(areanum), ax=axes[1,thiscol]) # counts in lower 
+                        # Section for labeling plotelements
+                        elemlines=getelemenergy(plotelems, bounds, AESquantparams, deriv=True) # can pass plot range as lower,upper tuple
+                        # list of tuples with energy,elemname
+                        for k, elemtuple in enumerate(elemlines):
+                            # elemtuple[0] is energy and [1] is element symbol
+                            # axes[thisrow,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                            try:
+                                axes[0,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                                axes[0,thiscol].text(elemtuple[0],-250, elemtuple[1],rotation=90, fontsize=18) # use standard -250 y val 
+                            except:
+                                print('Problem labeling elements')
+                        # Section for adding smooth-diff quant data
+                        if addsmdif:
+                            thisareapeaks=thisfilepeaks[thisfilepeaks['Areanumber']==areanum] 
+                            plotpts=thisareapeaks[(thisfilepeaks['Peakenergy']>lower) & (thisareapeaks['Peakenergy']<upper)]
+                            if not plotpts.empty:
+                                try:
+                                    plotpts.plot.scatter(x='Peakenergy', y='Negintensity', ax=axes[0,thiscol], color='r')
+                                    plotpts.plot.scatter(x='Pospeak', y='Posintensity', ax=axes[0,thiscol], color='r')                                        
+                                    titlestring=maketitlestring(plotpts)
+                                    axes[0,thiscol].set_title(titlestring, fontsize=10)
+                                except:
+                                    print('Problem adding points from smdif quant calcs for ', AugerFileName,'area # ', areanum )
+                        # add red vert line at multiplex energy break if present
+                        # removed... however evbreaks could be retrieved from AugerParamLog if desired
+                        '''
+                        for l, val in enumerate(energyvals):
+                            if val > lower and val < upper: 
+                                axes[0,thiscol].axvline(x=val, color='r') # on deriv plot
+                                axes[1,thiscol].axvline(x=val, color='r') # on counts plot 
+                        '''
+                        # Now plot counts and background fits in bottom row
+                        if plotbackpts==True:
+                            # Now add scatter plot points at fit region boundaries
+                            backpts=Augerslice[Augerslice.index.isin(indexptslist)] # gets background fitted pts but only from this data slice
+                            if not backpts.empty: # show fitted pts from counts
+                                backpts.plot.scatter(x='Energy', y='Counts'+str(areanum), ax=axes[1,thiscol])
+                            Augerslice.plot(x='Energy', y='Backfit'+str(areanum), ax=axes[1,thiscol]) 
+                        # now label elements for counts plot
+                        elemlines=getelemenergy(plotelems, bounds, AESquantparams, deriv=False) # can pass plot range as lower,upper tuple
+                        # list of tuples with energy,elemname
+                        for k, elemtuple in enumerate(elemlines):
+                            # elemtuple[0] is energy and [1] is element symbol
+                            # axes[thisrow,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                            try:
+                                axes[1,thiscol].axvline(x=elemtuple[0], color='b') # O line
+                                yval=(Augerslice['Counts'+str(areanum)].max()-Augerslice['Counts'+str(areanum)].min())*0.9+Augerslice['Counts'+str(areanum)].min()
+                                axes[1,thiscol].text(elemtuple[0],yval, elemtuple[1],rotation=90, fontsize=18) # use standard -250 y val 
+                            except:
+                                print('Problem labeling elements')
+                    # now hide empty subplots
+                    for i in range(0,numrows*numcols):
+                        if i>len(plotranges)-1:
+                            thisrow=i//numcols
+                            thiscol=i%numcols
+                            axindex=thisrow, thiscol # tuple to index axes 
+                            axes[axindex].set_visible(False)         
+                    pdf.savefig(fig)
+                    plt.close(fig)
+                except:
+                    print('Unknown problem plotting', AugerFileName,' area #', areanum)
+    plt.ion()
+    return

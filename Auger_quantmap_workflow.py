@@ -6,26 +6,40 @@ Created on Fri Dec  2 17:10:19 2016
 """
 import pandas as pd
 import numpy as np
-import shutil, sys, fileinput, os
+import sys
 
 if 'C:\\Users\\tkc\\Documents\\Python_Scripts' not in sys.path:
     sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts')
 import Auger_smdifquant_functions as AESsmquant
-import Auger_plot_functions as AESplot
 import Auger_quantmap_functions as QM
 
 #%% CREATE PHI FILES FOR AUTOTOOL, SPATIAL AREAS, MULTIPLEX CONDITIONS
 # A few of these are also stored in Auger import main (to allow QM data combination prior to quant)
+
 AugerParamLog=pd.read_csv('Augerparamlog.csv', encoding='cp437')
 Smdifpeakslog=pd.read_csv('Smdifpeakslog.csv', encoding='cp437')
 # Generate square pixel arrays of specified dimension and create associated .phi files (margin as percentage of field)
-QMpixarray, autotool=QM.makesquarearray(margin=0.2, arraysize=5,basename='array5x5file')
+kwargs={'imageregint':2} # image registration interval (value of 1 means register every 20 areas)
+QMpixarray, autotool=QM.makesquarearray(margin=0.2, arraysize=100,basename='array100x100file', **kwargs)
+QMpixarray, autotool=makesquarearray(margin=0.2, arraysize=100,basename='array100x100file', **kwargs)
 
 QM.writemultiplex('QM_multiplex.phi', dwelltime=20, numcycles=3, reginterval=1, regmode='Areas')
+QM.writemultiplex('QM_multiplex_100x100.phi', dwelltime=5, numcycles=1, reginterval=50, regmode='Areas')
 QM.writeautotool(autotool, 'QM_autotool20x20.phi') # write phi autotool file with correct spatial area names
 
-QMpixarray.to_csv('QMpixarray147163.csv', index=False)
+QMpixarray.to_csv('QMpixarray_acfer094area14.csv', index=False)
 
+# Make annotation of image with overlaid mapped region (last arg is margin )
+QM.showQMregion('Acfer094.157.jpg', AugerParamLog, 0.2)
+
+# Reload pixarray definition file 
+QMpixarray=loadQMpixarray()
+# Associate multiplex spe data files with correct pixels from quantmap (after data collection)
+QMpixarray=linkfilename(QMpixarray, 'Acfer094map', startnum=101)
+# Make 3D numpy array (specimage) with all spectral data; energy x values in energy list
+specimage, energy =makeQMarray(QMpixarray, 'Acfer094map')
+
+# 
 #%% Combine separate spe files to single quantmap (QM) file
 # Combine separate spe/csv files into single quant map file containing all areas (AugerParamLog autosaved)
 AugerParamLog=QM.combineQMdata(AugerParamLog,'139-143',QMname='')

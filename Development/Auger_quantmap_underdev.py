@@ -20,6 +20,54 @@ from matplotlib import path
 from PIL import Image, ImageDraw, ImageFont 
 from collections import defaultdict
 import numpy as np
+import glob
+import struct
+
+from PIL import Image, ImageDraw
+Xindex=0
+Yindex=0
+
+
+AugerFileName='Acfer094map.101.spe'
+
+basename='Acfer094map'
+    
+# Sort energy column (since all multiplex data is sorted by energy before return)
+    
+def getpixel(AugerFileName, area):
+      ''' 3D numpy array (X, Y are spatial and Z is signal ... electron counts/sec 
+    from single multiplex scan'''
+    
+def plotpixel(QMpixarray, Xindex, Yindex, Elements):
+    ''' Direct load spe multiplex data and plot subregions for given X, Y position '''
+    
+    
+basename='Acfer094map'
+
+
+
+    for index, row in QMpixarray.iterrows():
+        
+    
+AugerFileName='sub\\Acfer094map.101.spe'
+
+
+
+
+
+   
+
+def getspedata(AugerFileName):
+    ''' Direct open of SPE data without conversion '''
+    with open(AugerFileName, 'rb') as file:
+        filedata = file.read()
+    end=filedata.find(b'EOFH')
+    
+    
+    Augerdata, evbreaks=makemultiplex(bindata, csvdataname, energy, evbreaks, numareas, spectralregs)
+    
+    return evbreaks,
+
 # Plotting all numpy histograms from elementmaps
 def plothistograms(elementmaps, Elements)
 
