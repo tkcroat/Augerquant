@@ -18,7 +18,7 @@ import Auger_utility_functions as AESutils
 import Auger_quantmap_functions as QM
 
 #%% Set data directory with Auger data files (via cd in Ipython console, using tinker or using os.chdir)
-os.chdir('C:\Temp\Auger')
+os.chdir('C:\\Temp\\AugerQM\\28Sep17')
 # from tkinter import filedialog
 # datapath = filedialog.askdirectory(initialdir="H:\\Research_data", title = "choose data directory")
 
@@ -26,6 +26,9 @@ os.chdir('C:\Temp\Auger')
 
 filelist=glob.glob('*.sem')+glob.glob('*.map')+glob.glob('*.spe')
 filelist=glob.glob('*.map')
+filelist=glob.glob('*.sem')
+filelist=glob.glob('*.spe')
+
 
 # Find and read Auger logbook (xls file that contains phrase "Auger_logbook")
 # this file is to associate sample/project names with Auger file numbers and can be used to combine/average multiple spe files
@@ -37,7 +40,11 @@ Auger.checklogfile(filelist, Augerlogbook)
 
 #%% Main file processing loop for spe, sem and map files (header param extraction/ create csv from binaries)
 # If file in Augerparamlog.csv it won't be reprocessed.. for reprocessing delete filenumber from that log or delete entire log
-AugerParamLog = Auger.Augerbatchimport(filelist, Augerlogbook) # Extract params and process SEM, SPE and MAP files
+kwargs={}
+kwargs={'move':False} # option to not move files to /sub
+AugerParamLog = Auger.Augerbatchimport(filelist, Augerlogbook, **kwargs) # Extract params and process SEM, SPE and MAP files
+AugerParamLog = Augerbatchimport(filelist, Augerlogbook) 
+
 # augerparam log is not auto-saved ... 
 # log files are overwritten if they exist by default (but data binaries are not)
 AugerParamLog.to_csv('Augerparamlog.csv',index=False) # save all params to new more complete log file (not autosaved)
