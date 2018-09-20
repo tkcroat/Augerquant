@@ -11,9 +11,9 @@ import os, sys
 if 'C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules' not in sys.path:
     sys.path.append('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Modules')
 
+import Auger_utility_functions as AESutils
 import Auger_smdifquant_functions as AESsmquant
 import Auger_integquant_functions as AESintquant
-import Auger_utility_functions as AESutils
 import Auger_plot_functions as AESplot
 ''' AESsmquant contains functions related to peak finding in smooth-differentiated spectra
 whereas AESquant contains background fitting and integration over peaks for direct from counts '''
@@ -24,51 +24,69 @@ os.chdir('C:\Temp\Auger')
 
 # Reloading of key log files (required after alterations to csv files or restart)
 AugerParamLog, spelist, Smdifpeakslog, Integquantlog, Backfitlog, AESquantparams= AESutils.loadmainfiles()
-AugerParamLog, spelist, Smdifpeakslog, Integquantlog, Backfitlog, AESquantparams= loadmainfiles()
 subspelist, Smdifpeakslogsubs, Backfitlogsubs, Integquantlogsubs=AESutils.loadsubfiles()
 #%% Optional filtering of datasets (according to any custom criteria)
-spelist=spelist[(spelist['Filenumber']>=10000)]
-spelist=spelist[spelist['Filename'].str.contains('54-9')]
+spelist=spelist[(spelist['Filenumber']<=115)]
+spelist=spelist[spelist['Filename'].str.contains('M4b.')]
 
 # Interactive choice of spe files by filenumber
 myfiles=AESutils.pickspectraGUI(spelist)
+
 #%% MAIN BATCH SMDIFF (DERIVATIVE) QUANT LOOP from smooth-differentiated peaks  (via Multipak S7D7 algorithm) of all selected files in dataframe
 
 #Element and background region setup
-Elements=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
-Elements=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
+Peaks=AESutils.pickelemsGUI(AESquantparams, Smdifpeakslog, Integquantlog) # interactive element selection
+
+# Initial plotting ... check for peak shifts due to charging
+kwargs={}
+kwargs.update({'chargeshift':140})
+# interactive plot window typically for single spectrum
+kwargs=AESplot.AESplot_gui(spelist, Peaks, Smdifpeakslog, Backfitlog, Integquantlog, AESquantparams,  **kwargs)
+kwargs=AESplot_gui(spelist, Peaks, Smdifpeakslog, Backfitlog, Integquantlog, AESquantparams,  **kwargs)
+
+# plot report to PDF (many si)
+kwargs=AESplot.AESreport(spelist, Peaks, Smdifpeakslog, Backfitlog, Integquantlog, AESquantparams, **kwargs)
+kwargs=AESreport(spelist, Peaks, Smdifpeakslog, Backfitlog, Integquantlog, AESquantparams, **kwargs)
 
 # MAIN BATCH QUANT LOOP function which returns Smdifpeakslog dataframe with amplitude of every peak in above list
-# reprocess=False ... loads prior smdifpeakslog and skips files already processed
-Smdifpeakslog=AESsmquant.smdifbatchquant(spelist, Elements, AESquantparams, reprocess=False)
-Smdifpeakslog=smdifbatchquant(spelist, Elements, AESquantparams, reprocess=False)
-Smdifpeakslogsubs=AESsmquant.smdifbatchquant(subspelist, Elements, AESquantparams, reprocess=True)
+Smdifpeakslog=AESsmquant.smdiffquant_gui(spelist, Peaks, AESquantparams, Smdifpeakslog)
+# using some pre-filter above 
+Smdifpeakslog=AESsmquant.smdiffquant_gui(myfiles, Peaks, AESquantparams, Smdifpeakslog)
+Smdifpeakslog=smdiffquant_gui(myfiles, Peaks, AESquantparams, Smdifpeakslog)
 
-# Save smdifpeaks log result run below (this is not auto-saved!)
+# Save smdifpeaks log result run below (manually savable )
 Smdifpeakslog.to_csv('Smdifpeakslog.csv', index=False) # saves above peaks file
 Smdifpeakslogsubs.to_csv('Smdifpeakslog_subs.csv', index=False)
 
-# get peak statistics
-peakstats=AESsmquant.getpeakstats(Smdifpeakslog, Elements)
-peakstatssubs=AESsmquant.getpeakstats(Smdifpeakslogsubs, Elements)
+# Get peak statistics
+peakstats=AESsmquant.getpeakstats(Smdifpeakslog, Peaks)
+peakstatssubs=AESsmquant.getpeakstats(Smdifpeakslogsubs, Peaks)
 peakstats.to_csv('peakstats.csv', index=False)
 
-# histogram plots
-AESplot.plothist(Smdifpeakslog, spelist, Elements, col='Amplitude')
-AESplot.plothist(Integquantlog, spelist, Elements, col='Adjcnts')
+# Histogram plots
+AESplot.plothist(Smdifpeakslog, spelist, Peaks, col='Amplitude')
+AESplot.plothist(Integquantlog, spelist, Peaks, col='Adjcnts')
 
+# Load single region 
+kwargs={}
+Augerfile, kwargs=AESplot.loadsinglespe(spelist, Peaks, AESquantparams, **kwargs)
+Augerfile, kwargs=loadsinglespe(spelist, Peaks, AESquantparams, **kwargs)
+
+# Peak detector
+detect_peaks(np.asarray(Augerfile['S7D72']), mph=None, mpd=1, threshold=100, edge='rising',
+                 kpsh=False, valley=True, show=True, ax=None)
 #%% DIRECT INTEGRAL QUANT METHOD 
 # Now for integral method directly on counts (but guided by peak positions as determined above with smooth-diff spectrum)
-Elements=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
+Peaks=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
 
 # MAIN BATCH INTEGRAL METHOD fitting and direct integration loops (returns background fitting params and integrated quant results)
 # WARNING ... overwrite=True will overwrite background fit and peaks columns in source csv file (counts obviously unchanged)
-Backfitlog, Integquantlog = AESintquant.integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=True, overwrite=True)
-# set overwrite to false if redoing quant to add a group of new elements
-Backfitlog, Integquantlog = AESintquant.integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=False, overwrite=False)
+Backfitlog, Integquantlog = AESintquant.integbatchquant(myfiles, Smdifpeakslog, AESquantparams, Peaks, reprocess=True, overwrite=True)
+# set overwrite to false if redoing quant to add a group of new Peaks
+Backfitlog, Integquantlog = AESintquant.integbatchquant(spelist, Smdifpeakslog, AESquantparams, Peaks, reprocess=False, overwrite=False)
 
-# perform this explicitly on sub spe files
-Backfitlogsubs, Integquantlogsubs = AESintquant.integbatchquant(subspelist, Smdifpeakslogsubs, AESquantparams, Elements, reprocess=True, overwrite=True)
+# Perform this explicitly on sub spe files
+Backfitlogsubs, Integquantlogsubs = AESintquant.integbatchquant(subspelist, Smdifpeakslogsubs, AESquantparams, Peaks, reprocess=True, overwrite=True)
 # the background fit results and integration results must be manually saved (not-autosaved)
 Backfitlog.to_csv('Backfitlog.csv', index=False)
 Integquantlog.to_csv('Integquantlog.csv', index=False)
@@ -83,7 +101,7 @@ Integquantlog=AESintquant.calcadjcounts(Integquantlog, AESquantparams, sig=2, ke
 AugerParamLog, spelist, Smdifpeakslog, Integquantlog, Backfitlog, AESquantparams= AESutils.loadmainfiles()
 subspelist, Smdifpeakslogsubs, Backfitlogsubs, Integquantlogsubs=AESutils.loadsubfiles()
 
-# Choose elements list to plot and label
+# Choose Peaks list to plot and label
 plotelems=AESutils.pickelemsGUI(AESquantparams) # interactive element selection
 plotelems=['30-2130'] # can also just enter a range
 plotelems.append('100-500') # can also include eV range along with above list
@@ -92,34 +110,20 @@ spelist=AESutils.pickspectraGUI(spelist)# interactively grab subset of filenumbe
 # Grab compositional subsets for separate plot reports (example)
 Mgrich=Smdifpeakslog[(Smdifpeakslog['PeakID']=='Mg') & (Smdifpeakslog['Amplitude']>5000)]
 
-# General smooth-differentiated plot report for selected elements
-AESplot.reportSD(spelist, Smdifpeakslog, plotelems, AESquantparams) # default name is SDplots_report_09Jun17.pdf
-AESplot.reportSD(Mgrich, Smdifpeakslog, plotelems, AESquantparams, PDFname='Mgrich_areas.pdf')
-AESplot.reportSD(subspelist, Smdifpeakslogsubs, plotelems, AESquantparams, PDFname='SDreportsubs_3Jan17.pdf')
-
-# Plot report for direct peaks (option to include direct background fits from integral quant method)
-
-# Create a counts/background plot report over selected files 
-kwargs={} # kwargs fed back to set defaults in case of rerun
-kwargs=AESplot.countsbackreport_tk(spelist, Elements, Backfitlog, AESquantparams, **kwargs) 
-kwargs=countsbackreport_tk(spelist, Elements, Backfitlog, AESquantparams, **kwargs) 
-kwargs=AESplot.countsbackreport_tk(subspelist, Elements, Backfitlogsubs, AESquantparams, **kwargs) 
-
-# Plot report of derivative and counts on same page (top and bottom)
+# Generate plot reports (counts, deriv, both or peaks)
 kwargs={}
-kwargs=AESplot.countsderivreport_tk(spelist, Elements, Smdifpeakslog, Backfitlog, AESquantparams, **kwargs)
-kwargs=countsderivreport_tk(spelist, Elements, Smdifpeakslog, Backfitlog, AESquantparams, **kwargs)
+kwargs=AESplot.AESreport(spelist, Peaks, Smdifpeakslog, Backfitlog, Integquantlog, AESquantparams, **kwargs)
 
-# Plot report of counts - background for selected peaks (all areas )
-myfiles=AESutils.pickspectraGUI(spelist)
-AESplot.reportpeaksall(myfiles, plotelems, AESquantparams, PDFname='Peaks_report.pdf')
 # If erroneous spectra are found, add phrase exclude to comments in AugerParamLog for this filenumber... reload and then can be excluded from future processing
 # For refitting problematic subset and partial redo of those quant results ... see Auger_quant_alt.py
 
 # Single interactive plot of selected filenumber(s) .. calls AESplot1
 kwargs={}
-kwargs=AESplot.AESplot_tk(spelist, plotelems, Smdifpeakslog, Backfitlog, AESquantparams, **kwargs)
-kwargs=AESplot_tk(spelist, plotelems, Smdifpeakslog, Backfitlog, AESquantparams, **kwargs)
+# plotrange can be peak list or ev range
+# TODO add spe number selection
+plotrange='100-500'
+kwargs=AESplot.AESplot1(spelist, plotrange, Smdifpeakslog, Backfitlog, Integquantlog, AESquantparams, **kwargs)
+kwargs=AESplot.AESplot1(spelist, Peaks, Smdifpeakslog, Backfitlog, Integquantlog, AESquantparams, **kwargs)
 
 #%% COMPUTING ELEMENTAL COMPOSITIONS based on derivative quant method or integral quant method 
 
@@ -129,17 +133,17 @@ Smdifpeakslogsubs=AESsmquant.calcamplitude(Smdifpeakslogsubs, AESquantparams)
 Smdifpeakslog.to_csv('Smdifpeakslog.csv', index=False) # save above result (not auto-saved)
 Smdifpeakslogsubs.to_csv('sub\\Smdifpeakslog_subs.csv', index=False) 
 
-# Now calculate composition (at %) for selected elements
-Elements=AESutils.pickelemsGUI(AESquantparams) 
+# Now calculate composition (at %) for selected Peaks
+Peaks=AESutils.pickelemsGUI(AESquantparams) 
 
 # Calculate composition based on derivative method (smooth-diff comp)
 # Non-zero threshold excludes weak lines from quant results (threshold=1 means excluded if peak amplitude < noise amplitude
-Smdifcomp=AESsmquant.calccomposition(spelist, Smdifpeakslog, Elements, threshold=0.0)
-Smdifcompsubs=AESsmquant.calccomposition(subspelist, Smdifpeakslogsubs, Elements, threshold=0.0)
+Smdifcomp=AESsmquant.calccomposition(spelist, Smdifpeakslog, Peaks, threshold=0.0)
+Smdifcompsubs=AESsmquant.calccomposition(subspelist, Smdifpeakslogsubs, Peaks, threshold=0.0)
 
 Smdifcompsub=Smdifcompsubs[Smdifcompsubs['AESbasis']>0]
-# saves compositions and underlying elements/k-factors to auto-named xls file
-AESutils.writecomps(Smdifcomp, AESquantparams, Elements)
+# saves compositions and underlying Peaks/k-factors to auto-named xls file
+AESutils.writecomps(Smdifcomp, AESquantparams, Peaks)
 # read back previously saved compositional determinations (smdiffcomp or integcomp)
 Smdifcomp=pd.read_excel('Smdiffcomp_03Jan17.xlsx', sheetname='smdiffcomp')
 Smdifcompsubs=pd.read_excel('sub\\smdiffcomp_04Jan17.xlsx', sheetname='smdiffcomp')
@@ -147,7 +151,7 @@ Smdifcompsubs=pd.read_excel('sub\\smdiffcomp_04Jan17.xlsx', sheetname='smdiffcom
 Integcomp=pd.read_excel('integcomp_02Jan17.xlsx', sheetname='integcomp')
 
 Smdifcompsubs=pd.read_csv('Smdifcompsubs.csv')
-Mgoutlierquant=calccomposition(Mgoutliers, Smdifpeakslog, Elements, threshold=0.0)
+Mgoutlierquant=calccomposition(Mgoutliers, Smdifpeakslog, Peaks, threshold=0.0)
 Mgoutlierquant.to_csv('Mgoutlier_quant.csv',index=False)
 
 # Compare compositions from combine-averaged spe file and the underlying component spe files 
@@ -183,13 +187,13 @@ Integquantlog.to_csv('Integquantlog.csv', index=False)
 Integquantlogsubs.to_csv('sub\\Integquantlog_subs.csv', index=False)
 
 # Calculate compositions in at. % based on integral method
-Integcomp2=calccomp(spelist, Integquantlog, Elements, AESquantparams)
-Integcomp=AESintquant.calccomp(spelist, Integquantlog, Elements, AESquantparams)
-Integcompsubs=AESintquant.calccomp(subspelist, Integquantlogsubs, Elements, AESquantparams)
-Integcomp=calccomp(spelist, Integquantlog, Elements, AESquantparams)
+Integcomp2=calccomp(spelist, Integquantlog, Peaks, AESquantparams)
+Integcomp=AESintquant.calccomp(spelist, Integquantlog, Peaks, AESquantparams)
+Integcompsubs=AESintquant.calccomp(subspelist, Integquantlogsubs, Peaks, AESquantparams)
+Integcomp=calccomp(spelist, Integquantlog, Peaks, AESquantparams)
 
 # Write compositions to xls (along with k-factor details)
-AESutils.writecomps(Integcompsubs, AESquantparams, Elements)
+AESutils.writecomps(Integcompsubs, AESquantparams, Peaks)
 
 # save above result (not autosaved)
 Integcomp.to_csv('Integcomp.csv', index=False)
@@ -214,8 +218,10 @@ Smdifcomp.to_csv('temp.csv', index=False)
 
 # Scatter compositional comparison plots
 # Directly compare deriv and integ on exact same data files with multi-element scatter plots
-compdata, outliers=AESplot.scattercompplot_tk(Smdifcomp,Integcomp, Elements)
-compdata, outliers=AESplot.scattercompplot_tk(Smdifcomp, Smdifcomp2, Elements)
+compdata, outliers=AESplot.scattercompplot_tk(Smdifcomp,Integcomp, Peaks)
+compdata, outliers=AESplot.scattercompplot_tk(Smdifcomp, Smdifcomp2, Peaks)
+
+compdata, outliers=scattercompplot_tk(Smdifcomp,Integcomp, Peaks)
 
 compdata.to_csv('compdata_full.csv', index=False)
 compdata=pd.read_csv('compdata_full.csv') # read back temp saved data
@@ -263,7 +269,7 @@ duplicates=duplicates.reset_index()  # all possible duplicates incl. multi-area 
 
 duplicates=AESutils.findduplicates(integcomp) # returns duplicated but removes those with only multiple areas in single filenumber (maybe heterogeneous)
 
-duplicate_dataset=AESutils.compareduplicatecomps(duplicates, Elements) # returns avg comp in cases w/ multiple determinations
+duplicate_dataset=AESutils.compareduplicatecomps(duplicates, Peaks) # returns avg comp in cases w/ multiple determinations
 duplicate_dataset.to_csv('Duplicated_compositions.csv', index=False)
 
 # Plot report with ratios from duplicates 
@@ -313,13 +319,13 @@ C2010sel_integ.to_csv('C2010sel_integ2.csv', index=False)
 compdataset.to_csv('SEM_AESinteg_comparison.csv', index=False)
 Smdifpeakslog.to_csv('Smdifpeakslog.csv', index=False)
 
-# if multiple spectra exist, choose one with largest AESbasis for given Elements list
-spelist=AESsmquant.getbestduplicate(spelist, Smdifpeakslog, Elements) 
+# if multiple spectra exist, choose one with largest AESbasis for given Peaks list
+spelist=AESsmquant.getbestduplicate(spelist, Smdifpeakslog, Peaks) 
 AESutils.outputduplicates(spelist,'Sample') # simple utility to output samples with duplicate spectra into console
 
 AESutils.copyselectfiles(spelist,'best') # moves all underlying data into new subfolder (named by string argument)
 
-# Copying ten best spectra (based on AESbasis for chosen elements into another folder
+# Copying ten best spectra (based on AESbasis for chosen Peaks into another folder
 spelist=spelist.sort('AESbasis',ascending=False)
 best=spelist.head(10)
 AESutils.copyselectfiles(best,'best') #
