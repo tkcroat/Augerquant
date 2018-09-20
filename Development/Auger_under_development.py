@@ -18,15 +18,25 @@ from PIL import Image, ImageDraw, ImageFont # needed for jpg creation
 import datetime
 import tkinter as tk
 import statsmodels.formula.api as smf # has OLS module with convenient outliers tests
+
 #%%
 
-AESplot.AESplot1('140-144', spelist, AESquantparams, **kwargs) 
+row=AESsumm.iloc[0]
 
-''' TESTING
-files='111-115'
-areas='1'
-'''
+test= compsummary(Smdifcomp, Peaks, Peaksexcl)
+test.to_csv('test.csv',index=False)
 
+
+
+myarr=np.asarray(Auger.S7D72)
+
+
+detect_peaks(myarr, mph=None, mpd=1, threshold=-200, edge='rising',
+                 kpsh=False, valley=True, show=True, ax=None)
+    
+def peakshiftcorr(Smdifpeakslog):
+    ''' Measure correlations between peak shifts after removal of weak/absent peaks '''    
+    
 def packagequant():
     ''' Write backfit, integ, smdiff, AESquantparams to single Excel file '''
     

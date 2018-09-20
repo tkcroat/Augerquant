@@ -51,3 +51,33 @@ Tidata=Tidata.dropna(subset=['Erradjcnts'])
 Ti2data=Ti2data.dropna(subset=['Erradjcnts'])
 Ticomp=pd.merge(Tidata, Ti2data, how='inner',on=['Filenumber','Area'], suffixes=('','_2'))
 Ticomp.to_csv('Tidata.csv',index=False)
+
+# Are peak shifts correlated in strong spectra?  Stdev in shift col after strength filter
+Fe=Smdifpeakslog[Smdifpeakslog['PeakID']=='Fe']
+Fe['Amplitude'].hist(bins=20)
+Fe['Amplitude'].describe()
+Smdifpeakslog.columns
+
+# For peak shift determinations, use smdiff negpeak location or direct peak
+Shiftlog.plot.scatter(x='Amplitude',y='Avgshift')
+
+# Older/ alt plotting schemes (now replaced by single plot/report interface)
+# General smooth-differentiated plot report for selected elements
+AESplot.reportSD(spelist, Smdifpeakslog, plotelems, AESquantparams) # default name is SDplots_report_09Jun17.pdf
+AESplot.reportSD(Mgrich, Smdifpeakslog, plotelems, AESquantparams, PDFname='Mgrich_areas.pdf')
+AESplot.reportSD(subspelist, Smdifpeakslogsubs, plotelems, AESquantparams, PDFname='SDreportsubs_3Jan17.pdf')
+
+# Create a counts/background plot report over selected files 
+kwargs={} # kwargs fed back to set defaults in case of rerun
+kwargs=AESplot.countsbackreport_tk(spelist, Elements, Backfitlog, AESquantparams, **kwargs) 
+kwargs=countsbackreport_tk(spelist, Elements, Backfitlog, AESquantparams, **kwargs) 
+kwargs=AESplot.countsbackreport_tk(subspelist, Elements, Backfitlogsubs, AESquantparams, **kwargs) 
+
+# Plot report of derivative and counts on same page (top and bottom)
+kwargs={}
+kwargs=AESplot.countsderivreport_tk(myfiles, Elements, Smdifpeakslog, Backfitlog, AESquantparams, **kwargs)
+kwargs=countsderivreport_tk(myfiles, Elements, Smdifpeakslog, Backfitlog, AESquantparams, **kwargs)
+
+# Plot report of counts - background for selected peaks (all areas )
+myfiles=AESutils.pickspectraGUI(spelist)
+AESplot.reportpeaksall(spelist, plotelems, AESquantparams, PDFname='Peaks_report.pdf')

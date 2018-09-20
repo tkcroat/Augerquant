@@ -116,3 +116,15 @@ kwargs.update({'smd':Smdifpeakslog}) # optional plot of points in smooth-diff us
 AESplot.reportderivcnt(Ferich, plotelems, AESquantparams, **kwargs)
 
 # old kwarg construction for scatter comp plots
+
+# OLD WAY of doing quantmap QM files
+# Generate square pixel arrays of specified dimension and create associated .phi files 
+# Margin is percentage of image field that is unmapped boundary
+# Image registration (imageregint kwarg) is more flexible if done as item in autotool loop (rather than embedded in multiplex acquire)
+# autotool has steps associated with this quant map (incl. file links, etc.)
+kwargs={'imageregint':2} # image registration interval (value of 1 means register every 20 areas)
+QMpixarray, autotool=QM.makesquarearray(margin=0.2, arraysize=100, basename='array100x100file', **kwargs)
+
+# if using new arraysize/margin/ image registration combo, must write autotool files and spatial areas
+QM.writeautotool(autotool, 'QM_autotool20x20.phi') # write phi autotool file with correct spatial area names
+# this .phi file is placed in Auger Settings/Autotool folder before Smartsoft startup.. then load into Autotool 

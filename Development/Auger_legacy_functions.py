@@ -1,5 +1,420 @@
 # Auger legacy functions
 
+
+'''TESTING 
+i=0   X=0   Y=0  elnum=0
+[elem, order, peakind, lowind, highind, peakrange, lowrange, hirange, idealev, idealind, 
+                idealnegpeak, integwidth, chargeshift, peakwidth, searchwidth]=Elemdata[i]
+        
+'''
+def integmaps(specimage, backarray, Elemdata, shiftdict):
+    ''' Return integrated counts over each specified peak 
+    Charging and any charge compensation 
+    specimage - raw spectral image data 
+    backarray is slope-intercept of background fits for each pixel 
+    Elemdata contains all data regions, integ widths, etc.
+    shiftdict hold pixel and peak specific peak shift 
+    (calculated using 3x3 smoothed spectral image)
+    peak out of range problem handled by double counting same region on other side of peak
+    returns: dictionary w/ elem as key and np array containing [0] - total raw counts
+        [1] background fit counts [2] subtracted counts integrated over element-specific
+        integration width (usually 9eV wide)
+    REPLACED BY FINDALLPEAKS METHOD
+    '''
+    sumdict={}
+    for elnum, [elem, order, peakind, lowind, highind, peakrange, lowrange, hirange, idealev, idealind, 
+                idealnegpeak, integwidth, chargeshift, peakwidth, searchwidth] in enumerate(Elemdata):
+        shiftimage=shiftdict.get(elem,[]) # gets peak centers for this
+        xrange=np.arange(peakrange[0], peakrange[1]+1, 1.0) # same xrange for all
+        # np array holding integrated counts
+        sumarray=np.empty([specimage.shape[0],specimage.shape[1],3])
+        for X in range(0,specimage.shape[0]): # iterate over rows
+            for Y in range(0,specimage.shape[1]): # iterate over cols
+                # Get linear background over elem peak for given pixel
+                # Backarray contains slope, intercepts stacked for all elements in elem order
+                slope=backarray[X,Y,2*elnum]
+                intercept=backarray[X,Y,2*elnum+1]
+                backvals=np.zeros(xrange.shape)
+                for j in range(0, xrange.shape[0]):
+                    backvals[j]=slope*xrange[j]+intercept
+                # select data subset using indices of this peak
+                rawdata=specimage[X,Y,peakind[0]:peakind[1]+1]
+                # Calculated background subtracted data in this region 
+                subdata=specimage[X,Y,peakind[0]:peakind[1]+1]-backvals
+
+                thiscent=int((subdata.shape[0]-1)/2)+int(shiftimage[X,Y])
+                # Looking for peak integration limits
+                low=thiscent-int((integwidth-1)/2)
+                high=thiscent+int((integwidth-1)/2)
+                # Mirror integration regions if out-of-range (assumes roughly symmetric peak)
+                if low<0 | high>subdata.shape[0]:
+                    if low<0:
+                        # number of missing data channels
+                        numaddchan=-low
+                        low=0 # reset lower integ limit
+                        # compensate w/ double count of high-side counts
+                        addintegrange=[high-numaddchan+1,high+1]
+                    else:
+                        # number of missing data channels
+                        numaddchan=high-subdata.shape[0]+1
+                        high=subdata.shape[0] # reset upper integ limit
+                        # Double count points on opposite side of peak
+                        addintegrange=[low,low+numaddchan]
+                else:
+                    # full peak available in range
+                    addintegrange=[]
+                # Perform integrations (upper limit not included)
+                rawcounts=np.sum(rawdata[low:high])
+                backcounts=np.sum(backvals[low:high])
+                subcounts=np.sum(subdata[low:high])
+                if addintegrange:
+                    rawcounts+=np.sum(rawdata[addintegrange[0]:addintegrange[1]])
+                    backcounts+=np.sum(backvals[addintegrange[0]:addintegrange[1]])
+                    subcounts+=np.sum(subdata[addintegrange[0]:addintegrange[1]])
+                    if (rawdata[low:high].shape[0] + rawdata[addintegrange[0]:addintegrange[1]].shape[0]) != integwidth:
+                        print('Number of integrated elements not equal to peak integwidth')
+                sumarray[X,Y,0]=rawcounts
+                sumarray[X,Y,1]=backcounts
+                sumarray[X,Y,2]=subcounts
+        sumdict.update({elem:sumarray})
+    return sumdict
+
+def calcshifts(specimage, Elemdata, AESquantparams):
+    ''' Diagnostic to look at peak shifts across spatial array; return stats on all peaks 
+    over all pixels in spectral image; looking at direct peak not deriv
+    shifts for given element and shift image visualization of peak shifting magnitude
+    return:
+        numpy arrays for each element in dictionary w/ elem as key (can show position dependent
+        charging
+        peakstats - dict with each elements avreage, stdev, min max shift
+         '''       
+    #TODO modify this to handle charging shift determinations?? 
+    peakstats={}
+    shiftdict={}
+    print('Peak shift averages by element')
+    print('Element Mean Stdev Min Max')
+    for i, [elem, order, peakind, lowind, highind, peakrange, lowrange, hirange, idealev, idealind, 
+            idealnegpeak, integwidth, chargeshift, peakwidth, searchwidth] in enumerate(Elemdata):
+        [xmin, xmax]=peakind # unpack index range of elem/peak
+        # Calculate 2D shift array holding
+        shiftarr=np.empty([specimage.shape[0],specimage.shape[1]])
+        for x in range(0,specimage.shape[0]):
+            for y in range(0,specimage.shape[1]):
+                # Index # of true peak
+                if str(idealind)=='nan': # for charging samples ideal index can be out of scan range
+                    thisshift=peakrange[0]+(peakrange[1]-peakrange[0])*np.argmax(specimage[x,y,xmin:xmax])/(xmax-xmin)-idealev
+                else:
+                    thisshift=np.argmax(specimage[x,y,xmin:xmax])+xmin-idealind
+                shiftarr[x,y]=thisshift
+        shiftdict.update({elem:shiftarr})
+        # Grab and return mean, stdev, min, max
+        peakstats.update({elem: ["%.3f" % shiftarr.mean(), "%.3f" % shiftarr.std(), int(np.min(shiftarr)), int(np.max(shiftarr))]})
+        print(elem,'   ', "%.3f" % shiftarr.mean(), "%.3f" % shiftarr.std(),' ', int(np.min(shiftarr)),' ', int(np.max(shiftarr)))
+    return shiftdict, peakstats
+
+'''
+Testing:
+Augerslice.plot.scatter(x='Energy', y='Counts')
+'''
+def calcbackgrounds(specimage, energy, Elemdata):
+    ''' Linear fit of e- background under peak using low and high background regions
+    return as numpy slope[0], intercept[1],
+    can run on raw spectral image or perform adjacent averaging/filtering first
+
+    '''
+    # make 3D blank numpy array of correct X, Y pixel dimension 
+    # Z contains slope & intercept of fit for each element from Elemdata
+    backarray=np.empty([specimage.shape[0],specimage.shape[1], 2*len(Elemdata)])
+    Augerfile=pd.DataFrame()
+    # index through the entier 2D image (X and Y pixel positions)
+    for X in range(0,specimage.shape[0]):
+        for Y in range(0,specimage.shape[1]):
+            Augerfile['Energy']=energy
+            Augerfile['Counts']=specimage[X,Y]
+            # now loop through and fit each element
+            for i, [elem, order, peakind, lowind, highind, peakrange, lowrange, hirange, idealev, 
+                    idealind, integwidth, idealnegpeak, chargeshift, peakwidth, searchwidth] in enumerate(Elemdata):
+                backrange=[]
+                [lowmin, lowmax]=lowind # unpack index range of elem/peak
+                [highmin, highmax]=highind
+                backrange=[int(i) for i in range(lowmin, lowmax+1)]
+                backrange.extend([int(i) for i in range(highmin, highmax+1)])
+                Augerslice=Augerfile[Augerfile.index.isin(backrange)]
+                data1=Augerslice['Energy']
+                data2=Augerslice['Counts']
+                slope,intercept=np.polyfit(data1, data2, 1)
+                backarray[X,Y,2*i]=slope
+                backarray[X,Y,2*i+1]=intercept
+    return backarray
+
+	
+# old tk interfaces (since combined to single multipurpose reporting function)
+def countsbackreport_tk(spelist, Elements, Backfitlog, AESquantparams, **kwargs):
+    ''' tk interface for args/kwargs of countsback plot reporting 
+    all args/dataframes must be passed through to plot functions 
+    Options: 
+    1) filenums -- use all or choose subsets by filenumbers (spelist normally has all spe filenumbers in folder)
+    2) xrange-- can be list of elements, list of ev ranges or combination (parsed by setplotboundaries)
+    3) custom pdf name option
+    4) plot background fits -bool
+    TODO: subsetting of areas? 
+    '''
+    # TODO use prior kwargs to set defaults
+    # first print out existing info in various lines
+    root = tk.Tk()
+    filestr=tk.StringVar() # comma separated or range of filenumbers for plot
+    # Variable for entering eV range(s).. optionally used
+    xrangestr=tk.StringVar()  # energy range in eV 
+    xrangestr.set('')
+    now=datetime.datetime.now()
+    PDFname='Countsback_report'+'_'+now.strftime('%d%b%y')+'.pdf'
+    PDFnamestr=tk.StringVar()  # energy range in eV 
+    PDFnamestr.set(PDFname)
+    # elements list only displayed for now... change with separate tk selector
+    plotelemstr=tk.StringVar()
+    mytext='Peaks to be labeled:'+', '.join(Elements)
+    plotelemstr.set(mytext)
+    rangechoice=tk.StringVar()
+
+    # todo implement possible change of elements
+    newelems=tk.StringVar() # string for new element choices if made
+    newelems.set('')
+
+    backfitbool=tk.BooleanVar() # Bool for plotting background (if counts plot)
+    backfitptsbool=tk.BooleanVar() # Bool for plotting background (if counts plot)
+    plotelemsbool=tk.BooleanVar()  # optional labelling of elements
+    plotelemsbool.set(True) # default to true
+    choice=tk.StringVar()  # plot or abort
+    # set defaults based on prior run
+    # set defaults based on prior run
+    if 'addbackfit' in kwargs:
+        backfitbool.set(True)
+    if 'backfitpts' in kwargs:
+        backfitptsbool.set(True)
+    if 'plotelems' not in kwargs:
+        backfitptsbool.set(False)
+    a=tk.Label(root, text='Enter filenumbers for plot report (default all)').grid(row=0, column=0)
+    b=tk.Entry(root, textvariable=filestr).grid(row=0, column=1)
+    a=tk.Label(root, text='Optional xrange in eV (default 100-1900eV)').grid(row=1, column=0)
+    b=tk.Entry(root, textvariable=xrangestr).grid(row=1, column=1)
+    a=tk.Label(root, text='Enter PDF report name').grid(row=2, column=0)
+    b=tk.Entry(root, textvariable=PDFnamestr).grid(row=2, column=1)
+    # printout of peaks to be plotted (if chosen)
+    a=tk.Label(root, text=plotelemstr.get()).grid(row=3, column=0)
+    # Radio button for range (use element list, use ev strings or both)
+    radio1 = tk.Radiobutton(root, text='Plot element ranges', value='elems', variable = rangechoice).grid(row=0, column=2)
+    radio1 = tk.Radiobutton(root, text='Plot eV range', value='evrange', variable = rangechoice).grid(row=1, column=2)
+    radio1 = tk.Radiobutton(root, text='Join elements and eV range', value='both', variable = rangechoice).grid(row=2, column=2)
+    radio1 = tk.Radiobutton(root, text='Use full data range', value='full', variable = rangechoice).grid(row=3, column=2)
+    d=tk.Checkbutton(root, variable=backfitbool, text='Plot background fits?')
+    d.grid(row=4, column=0)
+    d=tk.Checkbutton(root, variable=backfitptsbool, text='Plot points used to fit background?')
+    d.grid(row=5, column=0)    
+    d=tk.Checkbutton(root, variable=plotelemsbool, text='Label element peaks?')
+    d.grid(row=6, column=0)    
+    # option to reselect labeled elemental peaks 
+    # TODO fix this nested tk interface ... chosen elements are not changing
+    def changeelems(event):
+        newelemlist=AESutils.pickelemsGUI(AESquantparams) # get new elements/peaks list 
+        newelems.set(', '.join(newelemlist))
+        newtext='Peaks to be labeled: '+', '.join(newelemlist)
+        plotelemstr.set(newtext)
+        
+    def abort(event):
+        choice.set('abort')        
+        root.destroy()  
+    def plot(event):
+        choice.set('plot')        
+        root.destroy()  
+    
+    d=tk.Button(root, text='Change labelled element peaks')
+    d.bind('<Button-1>', changeelems)
+    d.grid(row=7, column=0)
+
+    d=tk.Button(root, text='Plot')
+    d.bind('<Button-1>', plot)
+    d.grid(row=7, column=1)
+    
+    d=tk.Button(root, text='Abort')
+    d.bind('<Button-1>', abort)
+    d.grid(row=7, column=2)
+
+    root.mainloop()
+        
+    mychoice=choice.get()
+    
+    if mychoice=='plot':
+        # Set up kwargs for plot 
+        kwargs={}
+        if filestr.get()!='': # optional subset of files based on entered number
+            filenumlist=parsefilenums(filestr.get())
+            kwargs.update({'filesubset':filenumlist})
+        if backfitbool.get(): # plot backgrounds (stored in each Augerfile)
+            kwargs.update({'addbackfit':True})
+        if backfitptsbool.get(): # add points used for fitting background regions
+            kwargs.update({'backfitpts':True})
+        if plotelemsbool.get(): # add points used for fitting background regions
+            kwargs.update({'plotelems':Elements})
+        # Now create plotrange arg string (elems + evrange) based on radiobutton choice
+        plotrange=[]
+        if rangechoice.get()=='elems':
+            plotrange.extend(Elements)
+        elif rangechoice.get()=='evrange': # hyphenated ev range entered
+            tempstr=xrangestr.get()
+            plotrange.extend(tempstr.split(',')) # parse into strings if necessary (list must be passed)
+        elif rangechoice.get()=='both':
+            plotrange.extend(Elements) # start with elements list
+            tempstr=xrangestr.get()
+            plotrange.extend(tempstr.split(',')) # add ev ranges
+        elif rangechoice.get()=='full': 
+            # set to maximum possible range.. will be reduced if larger than data range
+            plotrange.append('0-2500') # parse into strings if necessary (list must be passed)
+        # get and pass PDF name string as arg (default name is prefilled)
+        myPDFname=PDFnamestr.get()
+        '''
+        if newelems!='': # use newly assigned values
+            kwargs.update({'plotelems':newelems.get()})       
+        '''
+
+        reportcountsback(spelist, plotrange, AESquantparams, Backfitlog, PDFname=myPDFname, **kwargs)
+        
+    return kwargs
+
+def countsderivreport_tk(spelist, Elements, Smdifpeakslog, Backfitlog, AESquantparams, **kwargs):
+    ''' tk interface for args/kwargs of countsderiv reports (deriv on top and counts below for all areas)
+    all args/dataframes must be passed through to plot functions 
+    Options: 
+    1) filenums -- use all or choose subsets by filenumbers (spelist normally has all spe filenumbers in folder)
+    2) xrange-- can be list of elements, list of ev ranges or combination (parsed by setplotboundaries)
+    3) custom pdf name option
+    4) plot background fits -bool
+    5) plot smdifpeak amplitude points -bool (for deriv plot below)
+    6) area subsets
+    TODO: subsetting of areas? 
+    '''
+    # TODO use prior kwargs to set defaults
+    # first print out existing info in various lines
+    root = tk.Tk()
+    filestr=tk.StringVar() # comma separated or range of filenumbers for plot
+    # Variable for entering eV range(s).. optionally used
+    xrangestr=tk.StringVar()  # energy range in eV 
+    xrangestr.set('')
+    now=datetime.datetime.now()
+    PDFname='Countsderiv_report'+'_'+now.strftime('%d%b%y')+'.pdf'
+    PDFnamestr=tk.StringVar()  # energy range in eV 
+    PDFnamestr.set(PDFname)
+    # elements list only displayed for now... change with separate tk selector
+    plotelemstr=tk.StringVar()
+    mytext='Peaks to be labeled:'+', '.join(Elements)
+    plotelemstr.set(mytext)
+    rangechoice=tk.StringVar()
+
+    # todo implement possible change of elements
+    newelems=tk.StringVar() # string for new element choices if made
+    newelems.set('')
+
+    backfitbool=tk.BooleanVar() # Bool for plotting background (if counts plot)
+    backfitptsbool=tk.BooleanVar() # Bool for plotting background (if counts plot)
+    smdifbool=tk.BooleanVar() # Bool for plotting background (if counts plot)
+    plotelemsbool=tk.BooleanVar()  # optional labelling of elements
+    plotelemsbool.set(True) # default to true
+    choice=tk.StringVar()  # plot or abort
+    # set defaults based on prior run
+    if 'addbackfit' in kwargs:
+        backfitbool.set(True)
+    if 'backfitpts' in kwargs:
+        backfitptsbool.set(True)
+    if 'plotelems' not in kwargs:
+        backfitptsbool.set(False)
+    a=tk.Label(root, text='Enter filenumbers for plot report (default all)').grid(row=0, column=0)
+    b=tk.Entry(root, textvariable=filestr).grid(row=0, column=1)
+    a=tk.Label(root, text='Optional xrange in eV (default 100-1900eV)').grid(row=1, column=0)
+    b=tk.Entry(root, textvariable=xrangestr).grid(row=1, column=1)
+    a=tk.Label(root, text='Enter PDF report name').grid(row=2, column=0)
+    b=tk.Entry(root, textvariable=PDFnamestr).grid(row=2, column=1)
+    # printout of peaks to be plotted (if chosen)
+    a=tk.Label(root, text=plotelemstr.get()).grid(row=3, column=0)
+    # Radio button for range (use element list, use ev strings or both)
+    radio1 = tk.Radiobutton(root, text='Plot element ranges', value='elems', variable = rangechoice).grid(row=0, column=2)
+    radio1 = tk.Radiobutton(root, text='Plot eV range', value='evrange', variable = rangechoice).grid(row=1, column=2)
+    radio1 = tk.Radiobutton(root, text='Join elements and eV range', value='both', variable = rangechoice).grid(row=2, column=2)
+    radio1 = tk.Radiobutton(root, text='Use full data range', value='full', variable = rangechoice).grid(row=3, column=2)
+    d=tk.Checkbutton(root, variable=backfitbool, text='Plot background fits?')
+    d.grid(row=4, column=0)
+    d=tk.Checkbutton(root, variable=backfitptsbool, text='Plot points used to fit background?')
+    d.grid(row=5, column=0)    
+    d=tk.Checkbutton(root, variable=plotelemsbool, text='Label element peaks?')
+    d.grid(row=6, column=0)
+    d=tk.Checkbutton(root, variable=smdifbool, text='Label amplitude pts in sm-diff?')
+    d.grid(row=7, column=0)
+    # option to reselect labeled elemental peaks 
+    # TODO fix this nested tk interface ... chosen elements are not changing
+    def changeelems(event):
+        newelemlist=AESutils.pickelemsGUI(AESquantparams) # get new elements/peaks list 
+        newelems.set(', '.join(newelemlist))
+        newtext='Peaks to be labeled: '+', '.join(newelemlist)
+        plotelemstr.set(newtext)
+        
+    def abort(event):
+        choice.set('abort')        
+        root.destroy()  
+    def plot(event):
+        choice.set('plot')        
+        root.destroy()  
+    
+    d=tk.Button(root, text='Change labelled element peaks')
+    d.bind('<Button-1>', changeelems)
+    d.grid(row=8, column=0)
+
+    d=tk.Button(root, text='Plot')
+    d.bind('<Button-1>', plot)
+    d.grid(row=8, column=1)
+    
+    d=tk.Button(root, text='Abort')
+    d.bind('<Button-1>', abort)
+    d.grid(row=8, column=2)
+
+    root.mainloop()
+        
+    mychoice=choice.get()
+    
+    if mychoice=='plot':
+        # Set up kwargs for plot 
+        kwargs={}
+        if filestr.get()!='': # optional subset of files based on entered number
+            filenumlist=parsefilenums(filestr.get())
+            kwargs.update({'filesubset':filenumlist})
+        if backfitbool.get(): # plot backgrounds (stored in each Augerfile)
+            kwargs.update({'addbackfit':True})
+        if backfitptsbool.get(): # add points used for fitting background regions
+            kwargs.update({'backfitpts':True})
+        if plotelemsbool.get(): # add points used for fitting background regions
+            kwargs.update({'plotelems':Elements})
+        if smdifbool.get(): # add points used for fitting background regions
+            kwargs.update({'smdifpts':True})
+        # Now create plotrange arg string (elems + evrange) based on radiobutton choice
+        plotrange=[]
+        if rangechoice.get()=='elems':
+            plotrange.extend(Elements)
+        elif rangechoice.get()=='evrange':
+            tempstr=xrangestr.get()
+            plotrange.extend(tempstr.split(',')) # parse into strings if necessary (list must be passed)
+        elif rangechoice.get()=='both':
+            plotrange.extend(Elements) # start with elements list
+            tempstr=xrangestr.get()
+            plotrange.extend(tempstr.split(',')) # add ev ranges
+        elif rangechoice.get()=='full': 
+            # set to maximum possible range.. will be reduced if larger than data range
+            plotrange.append('0-2500') # parse into strings if necessary (list must be passed)
+        # get and pass PDF name string as arg (default name is prefilled)
+        myPDFname=PDFnamestr.get()
+        '''
+        if newelems!='': # use newly assigned values
+            kwargs.update({'plotelems':newelems.get()})       
+        '''
+        reportderivcnt(spelist, plotrange, AESquantparams, Backfitlog, Smdifpeakslog, PDFname=myPDFname, **kwargs)
+    return kwargs
+
 # old version of scattercompplot before outlier determination/plotting
 
 def plotcntsmajor(Params, areanum):

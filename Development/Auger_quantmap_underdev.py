@@ -7,10 +7,10 @@ Created on Fri Dec  2 17:10:19 2016
 import pandas as pd
 import numpy as np
 import shutil, sys, fileinput, os, math
+from decimal import Decimal
 
 #%%
-
-# Can make basis and compositions for each area (normal quant process) 
+# Can make basis and compositions for each area (normal quant process) np.
 # Superimpose on grayscale image?
 
 # Sub-region selector for 10x10 arrays
@@ -22,60 +22,111 @@ from collections import defaultdict
 import numpy as np
 import glob
 import struct
+import random
+import brokenaxes
+from tkinter import filedialog
+# attempt at multiple peak detection using scipy find_peaks_cwt
+from peakutils.peak import indexes
+from peakdetect import peakdetect
+from scipy.signal import find_peaks_cwt
 
-from PIL import Image, ImageDraw
-Xindex=0
-Yindex=0
+from scipy.signal import argrelmin
 
+test=amplmaps[0]
 
-AugerFileName='Acfer094map.101.spe'
+# test plotting of various maps 
+fig, axes= plt.subplots(nrows=1, ncols=1)
+plt.imshow(amplmaps[0][:,:,0])
+plt.imshow(temp[:,:,0])
+plt.imshow(shiftmaps[3][:,:,1])
+plt.imshow(integmaps[1][:,:,0])
 
-basename='Acfer094map'
+showsubdata(peakdata, slope, intercept, mypeaks, thiselem)
     
-# Sort energy column (since all multiplex data is sorted by energy before return)
+showderivpeaks(thisenergy,s7d7,mypeaks)
+
+showdirectpeaks(peakdata, slope, intercept)
     
-def getpixel(AugerFileName, area):
-      ''' 3D numpy array (X, Y are spatial and Z is signal ... electron counts/sec 
-    from single multiplex scan'''
+peakdata=showsubdata()
+
+''' TESTING
+[elem, order, peakind, lowind, highind, peakrange, lowrange, hirange, 
+            idealev, idealind, idealnegpeak, integwidth, chargeshift, peakwidth, 
+            searchwidth]= Elemdata[i]
+'''
+
+np.unravel_index(myarr.argmin(), myarr.shape)
+
+
+
+def showderivpeaks(thisenergy,s7d7, mypeaks):
+    ''' Utility function for use during peak finding algorithm testing '''
+    fig, axes = plt.subplots(nrows=1, ncols=1)
+    thisspec=pd.DataFrame()
+    thisspec['Energy']=thisenergy
+    thisspec['s7d7']=s7d7
+    thisspec.plot(x='Energy', y='s7d7', ax=axes)
+    # Show neg and pospeaks
+    negpeaks=mypeaks.negpeakind.unique().tolist()
+    pospeaks=(mypeaks.negpeakind-mypeaks.Peakwidth).tolist()
+    pospeaks=[int(i) for i in pospeaks]
+    marks=pospeaks+negpeaks
+    markset=thisspec[thisspec.index.isin(marks)]
+    markset.plot.scatter(x='Energy', y='s7d7', ax=axes)
+
+def showdirectpeaks(peakdata, slope, intercept):
+    ''' Utility for use during direct peak background subtraction and peak finding '''
+    fig, axes = plt.subplots(nrows=1, ncols=1)
+    peakdata.plot(x='Energy', y='Counts', ax=axes)
+    xvals=np.arange(peakdata.Energy.min(),peakdata.Energy.max(),1)
+    yvals=slope*xvals+intercept
+    axes.plot(xvals, yvals)
+
+def showsubdata(peakdata, slope, intercept, mypeaks, thiselem):
+    ''' Utility to make subtracted data from slope, intercept 
+    plots and returns updated peakdata   '''
+    fig, axes = plt.subplots(nrows=1, ncols=1)
+    peakdata.plot(x='Energy', y='Subdata')
+
+
+# Looking for single pixel outliers ... smoothing 
+QMpixarray.columns
+
+QMpixarray=save_charging(QMpixarray, newmap)
+
+basename='50x50scramble'
+
+# Sete up binning for charge shift (changing multiplex scan)
+shiftrange=QMpixarray['Shift'].max()-QMpixarray['Shift'].min()
+shiftincr=4 # eV width of multiplex shift bin
+
+def calccomp(peakamplmaps, Elements):
+    ''' Using dict of peak amplitude maps and chosen elements determine compositions/ element ratios 
+    can be done on deriv data (i.e. calccomposition function) or direct integral data (calccomp'''
+
+def calcshifts_charging(specimage, Elemdata, bigpeak):
+    ''' Version of shift calculation from direct peaks in cases of large shifts  '''
+    thiselem=[i for i in Elemdata if Elemdata[0][0]==bigpeak]
+    [elem, peakind, lowind, highind, peakrange, lowrange, hirange, idealev, idealind, integwidth, 
+         chargeshift, peakwidth, searchwidth]=thiselem[0]
+    chargeshift=np.empty([specimage.shape[0],specimage.shape[1],1])
+    # use counts under makeshift 
+    peakmag=np.empty([specimage.shape[0],specimage.shape[1],1])
     
-def plotpixel(QMpixarray, Xindex, Yindex, Elements):
-    ''' Direct load spe multiplex data and plot subregions for given X, Y position '''
-    
-    
-basename='Acfer094map'
-
-
-
-    for index, row in QMpixarray.iterrows():
-        
-    
-AugerFileName='sub\\Acfer094map.101.spe'
-
-
-
-
-
-   
-
-def getspedata(AugerFileName):
-    ''' Direct open of SPE data without conversion '''
-    with open(AugerFileName, 'rb') as file:
-        filedata = file.read()
-    end=filedata.find(b'EOFH')
-    
-    
-    Augerdata, evbreaks=makemultiplex(bindata, csvdataname, energy, evbreaks, numareas, spectralregs)
-    
-    return evbreaks,
 
 # Plotting all numpy histograms from elementmaps
-def plothistograms(elementmaps, Elements)
+def plothistograms(elementmaps, Elements):
+    pass
 
-Mgmap=elementmaps[0][1]
-plt.imshow(image)
-plt.imshow(Mgmap, alpha=0.4) # transparent overlay
 
-filenum=148167
+test=np.concatenate([amplmaps[0],amplmaps[1]], axis=-1)
+test=np.concatenate([amplmaps[0],amplmaps[1]], axis=0)
+test=amplmaps[1]
+
+temp=np.zeros((50,50, 4*len(amplmaps)))
+for i, thismap in enumerate(amplmaps):
+    temp[:,:,i:i+4]=thismap
+
 
 x1=100
 x2=150
@@ -87,12 +138,18 @@ plt.figimage(Simap)
 
 plt.hist(Mgmap.ravel(), bins=20)
 
-
 ROIarray=selectROI()
 
 myarray=makeROI('tr184.171.jpg')
 myarray=makeROI('F01_3Mar17_ibeam_075.jpg')
 
+imagename='Acfer094map.100.jpg'
+
+def ROI_selector(nparr):
+    '''
+    tk inter with ROI selections
+    '''
+    
 def makeROI(imagename):
     '''Returns ROI from image either for QM data averaging or for setting active areas for mapping 
     has several inner functions '''
@@ -135,6 +192,8 @@ def makeROI(imagename):
         newArray = array.flatten()
         newArray[lin[indices]] = 1
         return newArray.reshape(array.shape) 
+    
+    def close():
         
     lasso = LassoSelector(ax1, onselect) # associated with subplot 1
     
