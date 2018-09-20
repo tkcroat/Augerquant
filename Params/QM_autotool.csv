@@ -1,0 +1,6 @@
+Command,Data
+AES:Register Image,
+SEM:Photo,
+AES:Load Multiplex Setting...,C:\Temp\QM_multiplex.phi
+SEM:Photo,
+SEM:SEM Load By Ref...,FJS-10kVdeflected
