@@ -8,11 +8,11 @@ import re
 from collections import defaultdict
 import pandas as pd
 import numpy as np
-import scipy
-import scipy.stats
 from scipy import optimize
 from math import factorial # used by Savgol matrix
 from scipy.optimize import curve_fit
+import os
+
 #%% 
 
 def compareavg_subs(Integcomp, Integcompsubs):
@@ -1038,24 +1038,50 @@ def fitbackgrounds(Augerfile, areanum, Elements, Shifts, AESquantparams, logmatc
     Backfitparams=Backfitparams.reset_index(drop=True) # removes duplicate indices which can cause later problems
     return Augerfile, Backfitparams 
 
-def findpeakshifts(logmatch, areanum, Smdifpeakslog, Elements):
-    ''' Find shifts of negpeak positions for each element in list for single spe file, return as list of floats
+def findpeakshifts(Augerfile, AESquantparams, logmatch, areanum, Smdifpeakslog, Elements):
+    ''' Find shifts of negpeak positions for each element in list for single spe file (using 
+    smdiff data), also finds direct peak
+    return as list of floats
     pass series with filename and given area
     ''' 
     # TODO problem if len(Elements)!=len(Shifts) due to couldn't find peak error
+    Shiftdiffs=pd.DataFrame(columns=['Filename','Areanumber','Element','Avgshift','Intshift','Diffshift','Amplitude'])
     filename=logmatch.Filename # get number from Series
     thispeakslog= Smdifpeakslog[(Smdifpeakslog['Filename']==filename)&(Smdifpeakslog['Areanumber']==areanum)]
     # need to match area number and file number for finding unique shift for this elem
     Shifts=[] # shift in peak position suggested by smdiff quant method
     for i, elem in enumerate(Elements):
-        thiselem= thispeakslog[(thispeakslog['PeakID']==elem)]
-        if len(thiselem)!=1: # peaks not present should have already been removed 
+        # find peak location based on smooth-diff negative peak 
+        smdifval= thispeakslog[(thispeakslog['PeakID']==elem)]
+        if len(smdifval)!=1: # peaks not present should have already been removed 
             print ("Couldn't find ", elem, " peak for area", str(areanum),"of spectrum ", filename)
-            Shifts.append('n/a') # keeps len(Elements)== len(Shifts)
-        if len(thiselem)==1: # should be match for all peaks that are present
-            shift=thiselem.iloc[0]['Shift']
-            Shifts.append(shift)
-    return Shifts # list of energy shift relative to ideal negpeak for each elemental peak
+            diffshift='n/a'
+            ampl='n/a'
+        if len(smdifval)==1: # should be match for all peaks that are present
+            diffshift=smdifval.iloc[0]['Shift']
+            ampl=smdifval.iloc[0]['Amplitude']
+        # find direct counts peak maximum
+        thiselem= AESquantparams[(AESquantparams['element']==elem)]
+        if len(thiselem)!=1:
+            print("Couldn't find ", elem, " in AESquantparams.")
+        else:
+            # extract range 
+            center=thiselem.iloc[0]['negpeak']+thiselem.iloc[0]['integpeak']
+            thismin=center-thiselem.iloc[0]['searchwidth']
+            thismax=center+thiselem.iloc[0]['searchwidth']
+            Augerslice=Augerfile[ (Augerfile['Energy']>=thismin) & (Augerfile['Energy']<=thismax)]
+            # x energy value of true counts max (use smoothed rather than raw counts)
+            intshift=int(Augerslice.loc[Augerslice['Smcounts'+str(areanum)].idxmax()]['Energy']-center)
+        # Reconcile differences
+        avgshift=int((diffshift+intshift)/2)
+        thisrow=pd.Series([filename, areanum, elem, avgshift, intshift, diffshift, ampl], index=['Filename','Areanumber', 'Element','Avgshift','Intshift','Diffshift','Amplitude'])
+        Shiftdiffs=Shiftdiffs.append(thisrow, ignore_index=True)
+        Shifts.append(avgshift)
+    return Shifts, Shiftdiffs # list of energy shift relative to ideal negpeak for each elemental peak
+
+'''TESTING
+index=58  areanum=1
+'''
 
 def integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=False, overwrite=True):
     ''' Batch quantification of all peaks in Elements list and noise amplitude at all chosen background regions (Backregs) 
@@ -1067,7 +1093,7 @@ def integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=
     # mycols2 is df structure for integquantlog
     mycols2=['Filenumber', 'Filename', 'Filepath', 'Sample', 'Comments', 'Areanumber', 'Element', 'Integcounts', 
     'Backcounts', 'Significance', 'Xc', 'Width', 'Peakarea', 'Y0','Rsquared','Numchannels']
-    
+    Shiftlog=pd.DataFrame(columns=['Filename','Element','Avgshift','Intshift','Diffshift','Amplitude'])
     if reprocess==True:    
         Linearfitlog=pd.DataFrame(columns=mycols) # blank log
         Integquantlog=pd.DataFrame(columns=mycols2)
@@ -1085,9 +1111,9 @@ def integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=
             print('No prior backfitlog or integquantlog... blank versions created.')
             Linearfitlog=pd.DataFrame(columns=mycols) # blank log
             Integquantlog=pd.DataFrame(columns=mycols2)
-    for i in range(0,len(spelist)):
+    for index, row in spelist.iterrows():
         # get ith row from parameters log for subset of selected spe files (i.e. from spelist)
-        logmatch=spelist.iloc[i] #contains row with filename and all other parameters from a given spectra 
+        logmatch=spelist.loc[index] #contains row with filename and all other parameters from a given spectra 
         logmatch=logmatch.squeeze() # convert/flatten to Series
         numareas=int(logmatch.Areas) # get # of spatial areas for this spe
         # load Auger spe file of interest here
@@ -1134,7 +1160,7 @@ def integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=
                 Augerfile[peakname]=np.nan
             
             # Get list of negpeak shift for these elements (from Shift column of Smdifpeakslog)
-            Shifts=findpeakshifts(logmatch, areanum, Smdifpeakslog, Elements) # single shift val in eV for each elem 
+            Shifts, Thisshiftlog = findpeakshifts(Augerfile, AESquantparams, logmatch, areanum, Smdifpeakslog, Elements)
             # Each area has its own Elemdata (selected background fit regions)
             # Elemdata=findfitregions(Augerfile, areanum, Elements, Shifts, AESquantparams, logmatch)
             
@@ -1147,7 +1173,24 @@ def integbatchquant(spelist, Smdifpeakslog, AESquantparams, Elements, reprocess=
             # append linear fit result from this spe/this area to longer master list
             Linearfitlog=Linearfitlog.append(Backfitparams, ignore_index=True)
             Integquantlog=Integquantlog.append(Integresults, ignore_index=True)
+            Shiftlog=Shiftlog.append(Thisshiftlog, ignore_index=True)
         # direct save of modified auger csv with new linear background fits (after all areas processed)
         Augerfile.to_csv(AugerFileName, index=False)
         Linearfitlog=Linearfitlog[mycols] # put back in original order
-    return Linearfitlog, Integquantlog # not auto-saved ... must be manually saved
+    if not os.path.exists('Backfitlog.csv'):
+        Linearfitlog.to_csv('Backfitlog.csv', index=False)
+    else:
+        print('Backfitlog exists so not autosaved.')
+    if not os.path.exists('Integquantlog.csv'):
+        Integquantlog.to_csv('Integquantlog.csv', index=False)
+    else:
+        print('Integquantlog exists so not autosaved.')
+    if not os.path.exists('Shiftlog.csv'):
+        Shiftlog.to_csv('Shiftlog.csv', index=False)
+    else:
+        print('Shiftlog exists so not autosaved.')
+    # calculate adjusted counts w/ current k-factors (and error)
+    # TODO make tk gui interface w/ integquant options 
+    Integquantlog=calcadjcounts(Integquantlog, AESquantparams, sig=2, kerrors=True) 
+    return Linearfitlog, Integquantlog, Shiftlog # not auto-saved ... must be manually saved
+ 

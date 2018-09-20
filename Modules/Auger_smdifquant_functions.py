@@ -31,10 +31,151 @@ import re, csv, datetime, os
 import pandas as pd
 import numpy as np
 from collections import defaultdict
+import tkinter as tk
 #%%
 
 # def checkindices(Elements, Backregs): # maybe faster version of findindices if same energy structure in multiplex?
 
+def smdiffquant_gui(spelist, Elements, AESquantparams, Smdifpeakslog):
+    ''' tk Front-end for batch quant... 
+    1) filter by filenumber available (all areas) 
+    2) reprocess (bool)
+    3) apply predetermined large shift (for samples with charging)  '''
+    root = tk.Tk()
+    root.title("Run quant on derivative spectra ")
+    # Filtering by filenumber or filename or combo files only
+    filterstr=tk.StringVar() # comma separated or range of filenumbers for plot or string for sample name
+    filtercol=tk.StringVar()  # to which column is optional filter applied
+    filtercol.set('Filenumber') # set default to filename (not sample)
+    combobool=tk.BooleanVar() # Select only combine-averaged files
+    # Apply custom shift 
+    customshiftbool=tk.BooleanVar()
+    shift=tk.IntVar()
+    choice=tk.StringVar() # for action button
+
+    # string showing active elements
+    elemstr=tk.StringVar()
+    mytext=', '.join(Elements) # elements for labelling 
+    elemstr.set(mytext)
+    # reprocess existing files or not
+    reprocess=tk.BooleanVar()  
+    # autosave altered file or not
+    autosave=tk.BooleanVar()
+    autosave.set(True)
+    # Optional filtering of chosen spectra by filenumber or string
+    rownum=0
+    tk.Label(root, text='Filenumber(s) or sample name filter').grid(row=rownum, column=0)
+    tk.Radiobutton(root, text='Filenumber(s) filter ', value='Filenumber', variable = filtercol).grid(row=rownum, column=1)
+    tk.Checkbutton(root, variable=reprocess, text="Choose combine-averaged files").grid(row=rownum, column=2)
+    rownum+=1
+    tk.Radiobutton(root, text='Filter on sample column', value='Filename', variable = filtercol).grid(row=rownum, column=1)
+    tk.Entry(root, textvariable=filterstr).grid(row=rownum, column=0)
+    rownum+=1
+    tk.Label(root, text="Elements for quant").grid(row=rownum, column=0)
+    tk.Entry(root, textvariable=elemstr).grid(row=rownum, column=1)
+    rownum+=1
+    tk.Checkbutton(root, variable=reprocess, text="Reprocess all spectra").grid(row=rownum, column=0)
+    rownum+=1
+    tk.Checkbutton(root, variable=autosave, text="autosave smdifquant log file?").grid(row=rownum, column=0)
+    rownum+=1
+    tk.Checkbutton(root, variable=customshiftbool, text='Apply custom shift?').grid(row=rownum, column=0)
+    tk.Entry(root, textvariable=shift).grid(row=rownum, column=1)
+    rownum+=1
+    
+    def abort(event):
+        choice.set('abort')        
+        root.destroy()  
+    def quantify(event):
+        choice.set('quantify')        
+        root.destroy()  
+        
+    def repickelems(event):
+        ''' trigger pickelemsgui again (from within this tk interface) '''
+        Elements=repickelems(AESquantparams)
+        # Elements=AESutils.pickelemsGUI(AESquantparams)
+        print('Reselected elements:')
+        print(', '.join(Elements))
+        # TODO fix this... passing back unaltered 
+        mytext=', '.join(Elements)
+        elemstr.set(mytext)
+        
+    a=tk.Button(root, text='Repick elements')
+    a.bind('<Button-1>', repickelems)
+    a.grid(row=rownum, column=0)
+
+    a=tk.Button(root, text='Abort')
+    a.bind('<Button-1>', abort)
+    a.grid(row=rownum, column=1)
+    
+    a=tk.Button(root, text='Quantify')
+    a.bind('<Button-1>', quantify)
+    a.grid(row=rownum, column=2)
+    
+    root.mainloop()
+    
+    if choice.get()=='quantify':
+        kwargs={} # reconstruct with new choices
+        if filtercol.get()=='Filenumber' and filterstr.get()!='':
+            filenums=parsefilenums(filterstr.get())  # list of ints 
+            spelist=spelist[spelist['Filenumber'].isin(filenums)]
+            # store filenums used in kwargs (for possible next run)
+            kwargs.update({'fileset':', '.join([str(i) for i in filenums])})
+        elif filtercol.get()=='Filename' and filterstr.get()!='':
+            filstr=filterstr.get()
+            # Assumes filtering on string in sample column
+            spelist=spelist[spelist[filtercol.get()].str.contains(filstr)]
+            if len(spelist)==0:
+                print('No files with ',filstr, 'in sample name')
+                return
+        if combobool.get():
+            # Choose only combine averaged files (named 100103 or comparable)
+            spelist=spelist[spelist['Filenumber']>10000]
+        if reprocess.get():
+            kwargs.update({'reprocess':True})
+        if shift.get()!=0:
+            # add custom offset to quant params (but don't change core version)
+            Aquant=AESquantparams.copy()
+            Aquant['negpeak']+=int(shift.get())
+            Aquant['pospeak']+=int(shift.get())
+        else:
+            Aquant=AESquantparams.copy()
+            # alter all negpeak in AESquantparams 
+        Smdifpeakslog=smdifbatchquant(spelist, Elements, Aquant, Smdifpeakslog, **kwargs)
+        if autosave.get(): # flag to automatically write changes to log
+            Smdifpeakslog.to_csv('Smdifpeakslog.csv', index=False)
+        return Smdifpeakslog
+
+    return Smdifpeakslog
+
+def parsefilenums(filestr): 
+    ''' Takes string containing filenumbers or ranges of filenums and returns as int list''' 
+    myfiles= set()
+    invalid = set()
+    # tokens are comma seperated values
+    tokens = [x.strip() for x in filestr.split(',')]
+    for i, tok in enumerate(tokens):
+        try:
+            # typical tokens are ints
+            myfiles.add(int(tok))
+        except: # if not, then it might be a range
+            try:
+                token = [int(k.strip()) for k in tok.split('-')]
+                if len(token) > 1:
+                    token.sort()
+                    # try to build a valid range from hyphenated items
+                    first = int(token[0])
+                    last = int(token[len(token)-1])
+                    for x in range(first, last+1):
+                        myfiles.add(x)
+            except:
+                # not an int and not a range...
+                invalid.add(tok)
+    # Report invalid tokens before returning valid selection
+    if invalid: # test if any invalid 
+        print ('Invalid set of files: ' + str(invalid))
+    myfiles=list(myfiles)
+    return myfiles
+   
 def compareavg_subs(Smdifcomp, Smdifcompsubs):
     '''Compare compositions on same samples derived from avg-combined files named 173175
     and the sub-spe files 173,174,175, single line for each'''
@@ -224,6 +365,7 @@ def cloneparamrows(df):
     df=df.sort_values(['Filenumber','Areanumber'])
     return df
 
+# Testing df=spelist.copy()  elemlist=Peaks
 def calccomposition(df, Smdifpeakslog, elemlist, threshold=0.0):
     '''Calculate elemental composition of given subset of files (generally an spelist) based on input element list 
     can also pass a later list of files (i.e. outliers) that are already split by filenumber/areanumber    
@@ -240,9 +382,13 @@ def calccomposition(df, Smdifpeakslog, elemlist, threshold=0.0):
         df=cloneparamrows(df)
     df=df.reset_index(drop=True)
     df['AESbasis']=0.0 # resets to zero if already present from calcamplitude
-    mycols=['Filenumber', 'Project', 'Filename', 'FilePath', 'Sample', 'Comments','AESbasis','Areanumber']
+    mycols=['Filenumber', 'Project', 'Filename', 'FilePath', 'Sample', 'Comments',
+            'Phase','AESbasis','Areanumber']
+    for i, col in enumerate(mycols):
+        if col not in df.columns:
+            df[col]=''
     for i, elem in enumerate(elemlist):  # add columns for raw peak amplitudes and significance (smooth-differentiation method)
-        df[elem+'ampl']=0.0 # add col for each element to spelist
+        df[elem+'ampl']=0.0 # add col for each element to df
         df['sig'+elem]=0.0 # significance (based on ratio of peak amplitude over average noise amplitude)
         mycols.append(elem+'ampl')
         mycols.append('sig'+elem)
@@ -252,7 +398,7 @@ def calccomposition(df, Smdifpeakslog, elemlist, threshold=0.0):
         mycols.append(elem+'ampl')
         mycols.append('sig'+elem)
     for i, elem in enumerate(elemlist):  # add columns for basis
-        df[elem]=0.0 # add col for each element to spelist
+        df[elem]=0.0 # add col for each element to df
         mycols.append(elem)
     for i,elem in enumerate(list(multipeaklist.keys())): # get elements (keys) from dict
         df[elem]=0.0
@@ -265,24 +411,24 @@ def calccomposition(df, Smdifpeakslog, elemlist, threshold=0.0):
         colname='%'+elem # at % columns named %S, %Mg, etc.
         mycols.append(colname)  # add to column list template
         df[colname]=0.0
-    for i in range(0,len(df)): # loop through each desired spectrum
-        filename=df.iloc[i]['Filename']
-        areanum=df.iloc[i]['Areanumber']
+    for index, row in df.iterrows(): # loop through each desired spectrum
+        filename=df.loc[index]['Filename']
+        areanum=df.loc[index]['Areanumber']
         match=Smdifpeakslog[Smdifpeakslog['Filename']==filename] # find smdif data for this filenumber
         # TODO add loop through different areas 
         match=match[match['Areanumber']==areanum] # matches correct spatial area number
         basis=0.0 #
+        # Testing elem=elemlist[0]
         for j, elem in enumerate(elemlist): # handle the single peak elements
             temp=match[match['PeakID']==elem] # finds entry for this element 
             if len(temp)==1: # peakid might be skipped (len 0) if out of data range
                 avgnoise=(abs(temp.iloc[0]['Lowbackamplitude'])+abs(temp.iloc[0]['Highbackamplitude']))/2 #
                 thissig=temp.iloc[0]['Amplitude']/avgnoise # ratio of peak amplitude to a measure of spectral noise amplitude
-                df=df.set_value(i, 'sig'+elem, thissig) # store this value (even if removed from basis)
+                df=df.set_value(index, 'sig'+elem, thissig) # store this value (even if removed from basis)
                 temp=thresholdtest(temp, threshold) # zeros out adjamp if below noise threshold 
-            if len(temp)==1: # single match unless element out of range
                 colname=elem+'ampl'
-                df=df.set_value(i, colname, temp.iloc[0]['Amplitude']) # copy raw amplitude of this element
-                df=df.set_value(i, elem, temp.iloc[0]['Adjamp']) # copy adjusted amplitude of this element
+                df=df.set_value(index, colname, temp.iloc[0]['Amplitude']) # copy raw amplitude of this element
+                df=df.set_value(index, elem, temp.iloc[0]['Adjamp']) # copy adjusted amplitude of this element
                 basis+=temp.iloc[0]['Adjamp'] # add this element's value to AES basis
         # now handle the multipeak elements (get average value from both peaks)
         for key, value in multipeaklist.items(): # key is element (aka colname in df), value is list of peaks in Smdifpeakslog
@@ -297,7 +443,6 @@ def calccomposition(df, Smdifpeakslog, elemlist, threshold=0.0):
                     avgnoise=(abs(temp.iloc[0]['Lowbackamplitude'])+abs(temp.iloc[0]['Highbackamplitude']))/2 #
                     avgrat+=temp.iloc[0]['Amplitude']/avgnoise # ratio of peak amplitude to a measure of spectral noise amplitude
                     temp=thresholdtest(temp, threshold) # zeros out adjamp if below noise threshold                
-                if len(temp)==1: # should be single match unless element is out of range
                     avgval+=temp.iloc[0]['Adjamp']
                     avgvalraw+=temp.iloc[0]['Amplitude']
                 else:
@@ -306,28 +451,28 @@ def calccomposition(df, Smdifpeakslog, elemlist, threshold=0.0):
                 avgval=avgval/numlines # this is now average basis for given element
                 avgvalraw=avgvalraw/numlines # this is now average basis for given element
                 avgrat=avgrat/len(templist) # ratio calc done for all peaks (none knocked out)
-            df=df.set_value(i, key, avgval) # copy adjusted amplitude of this element
-            df=df.set_value(i, 'sig'+key, avgrat) # copy average ratio of peak relative to noise amplitude of this element
-            df=df.set_value(i, key+'ampl', avgvalraw) # copy adjusted amplitude of this element
+            df=df.set_value(index, key, avgval) # copy adjusted amplitude of this element
+            df=df.set_value(index, 'sig'+key, avgrat) # copy average ratio of peak relative to noise amplitude of this element
+            df=df.set_value(index, key+'ampl', avgvalraw) # copy adjusted amplitude of this element
             # add value from this element to AESbasis
             basis+=avgval
-        df=df.set_value(i, 'AESbasis', basis) # write total basis value to df 
+        df=df.set_value(index, 'AESbasis', basis) # write total basis value to df 
         # now compute at.% for each listed element
         for j, elem in enumerate(elemlist):
             colname='%'+elem
-            ratio=df.iloc[i][elem]/df.iloc[i]['AESbasis']
-            df=df.set_value(i, colname, ratio)
+            ratio=df.loc[index][elem]/df.loc[index]['AESbasis']
+            df=df.set_value(index, colname, ratio)
         # also calculate for elements w/ multiple peaks (if present)
         for key, value in multipeaklist.items(): 
             colname='%'+key
-            ratio=df.iloc[i][key]/df.iloc[i]['AESbasis']
-            df=df.set_value(i, colname, ratio)
+            ratio=df.loc[index][key]/df.loc[index]['AESbasis']
+            df=df.set_value(index, colname, ratio)
         # end of loop calculation for each spectrum 
                 
     # organize data based on mycols template
     df=organizecolumns(df,mycols)
     return df
-       
+
 def calcamplitude(df, AESquantparams):
     '''For each elemental peak in smdifpeaks log, calculate basis with k-factor and mass
     result stored in adjamp column and used for subsequent compositional determinations
@@ -349,6 +494,7 @@ def calcamplitude(df, AESquantparams):
                 newval=df.iloc[j]['Amplitude']*kfactor/mass
                 df=df.set_value(j,'Adjamp',newval)
     return df
+
 
 def getbestduplicate(df, Smdifpeakslog, elemlist):
     ''' Used to choose a single best spectrum for each sample based on elemlist basis (drop inferior ones based on value in sortparam)
@@ -600,33 +746,30 @@ def smdifbackground(logmatch,Backregdata):
             # find and assign associated energy  
     return Smdifback # df with smooth-diff peaks for all areas/ all elements
 
-def smdifbatchquant(spelist, Elements, AESquantparams, reprocess=False, Backregs=[121,200,405,800,1475,1850]):
+def smdifbatchquant(myfiles, Elements, AESquantparams, Smdifpeakslog, Backregs=[121,200,405,800,1475,1850], **kwargs):
     ''' Batch quantification of all peaks in Elements list and noise amplitude at all chosen background regions (Backregs) 
     returns df with peak positions, amplitudes, width, energy shift, etc.
+    kwargs:
+        reprocess: flag to redo all deriv quant (default is False)
     '''   
     # Backregs was an attempt to monitor signal to noise in differentiated spectra but it's not very good
     # often insufficient energy range to do this well in multiplex spectra
     # should replace this with Ogliore/Gazda 2015 error estimation methods 
     Elemdata=[] # list of tuples with elem symbol and other params needed to find smoothed-differentiated peak in given spectrum
     Backregdata=[] # list of energy value for background peak checks and associated index value (for easier slicing)
-    if reprocess==True: # redo all in list and don't keep prior 
+    if kwargs.get('reprocess', False):
+        # do not keep any prior data runs if reprocess all set to true
         Smdifpeakslog=pd.DataFrame() # empty dataframe to hold all peaks, all spe files
-    if reprocess==False: # load existing smdifpeaks file
-        try:
-            Smdifpeakslog=pd.read_csv('Smdifpeakslog.csv', encoding='utf-8') # data from prior run
-        except:
-            print('No prior smdifpeakslog found... new file created')
-            Smdifpeakslog=pd.DataFrame()         
-    for i in range(0,len(spelist)):
-        # get ith row from parameters log for subset of selected spe files (i.e. from spelist)
-        logmatch=spelist.iloc[i] #contains row with filename and all other parameters from a given spectra 
+    for index, row in myfiles.iterrows():
+        # get ith row from parameters log for subset of selected spe files (i.e. from myfiles)
+        logmatch=myfiles.loc[index] #contains row with filename and all other parameters from a given spectra 
         logmatch=logmatch.squeeze() # convert/flatten to Series
         # work with indices or directly with energy vals?  indices probably faster for smooth-deriv method
         filename=logmatch.Filename
         if not os.path.isfile(filename):
             print ('File ', filename, 'not found.')
             continue
-        if reprocess==False: # check if already present in smdiflog, if so skip reprocessing
+        if not kwargs.get('reprocess', False): # check if already present in smdiflog, if so skip reprocessing
             try:
                 match=Smdifpeakslog[Smdifpeakslog['Filename']==filename]
                 if len(match)!=0:
@@ -640,7 +783,7 @@ def smdifbatchquant(spelist, Elements, AESquantparams, reprocess=False, Backregs
             except: # handles empty dataframe problem (no prior run)
                 pass
         # Elemdata has index #s of ideal positions for this energy list
-        Elemdata, Backregdata=findindices(Elements,Backregs, logmatch, AESquantparams) # passes ideal position
+        Elemdata, Backregdata=findindices(Elements, Backregs, logmatch, AESquantparams) # passes ideal position
         if len(Elemdata)==0:
             print('Problem finding indices for ', filename)
             continue
@@ -663,4 +806,6 @@ def smdifbatchquant(spelist, Elements, AESquantparams, reprocess=False, Backregs
     'Negintensity','Posintensity','Pospeak','Amplitude','Peakwidth','Lowback','Lowbackamplitude','Highback','Highbackamplitude',
     'Avgbackamplitude','Quantdetails']
     Smdifpeakslog=Smdifpeakslog[mycols] # reorder and drop extra columns (may drop adjamp but easily recalculated)
-    return Smdifpeakslog # not autosaved!
+    # Go ahead and run calc amplitude 
+    Smdifpeakslog=calcamplitude(Smdifpeakslog, AESquantparams)
+    return Smdifpeakslog # not autosaved (optional autosave in tk gui)

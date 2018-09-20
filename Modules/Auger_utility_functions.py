@@ -22,6 +22,56 @@ AugerParamLog=removefromlog(excludelist, AugerParamLog) # removes log entries fr
 AugerParamLog=removelistdups(AugerParamLog,'Evbreaks')
 '''
 
+def compsummary(Smdifcomp, Peaks, Peaksexcl):
+    ''' Compositional summary that keeps at % and identifying fields only
+    can be used on integ or smdiff quant '''
+    AESsumm=Smdifcomp.copy()
+    mycols=['Filename', 'Sample', 'Comments', 'AESbasis', 'Phase']
+    # Handle quant including the excluded elements
+    missing=[i for i in Peaksexcl if i not in Peaks]
+    if len(missing)>0:
+        print(','.join(missing),' excluded peaks missing from peaks list')
+        for i, peak in enumerate(missing):
+            Peaksexcl.remove(peak)
+    missing=[i for i in Peaks if i not in Smdifcomp.columns]
+    if len(missing)>0:
+        print(','.join(missing),' peak not present in AES smdifcomp... removed')
+        for i, elem in enumerate(missing):
+            Peaks.remove(elem)
+    real=[i for i in Peaks if i not in Peaksexcl]
+    # order with real elems first and excluded second
+    for i, elem in enumerate(real):
+        mycols.append('%'+elem)
+    mycols.append('Total')
+    if 'Total' not in AESsumm.columns:
+        AESsumm['Total']=np.nan
+    # put excluded peaks at the end (after total)
+    for i, elem in enumerate(Peaksexcl):
+        mycols.append('%'+elem)
+    for index, row in AESsumm.iterrows():
+        peaksumm=0.0
+        # Compute at.% including all elems
+        for i, elem in enumerate(Peaks):
+            peaksumm+=row['%'+elem] # should be 1
+        # normalize peaks to unity
+        for i, elem in enumerate(Peaks):
+            AESsumm=AESsumm.set_value(index,'%'+elem, 
+                AESsumm.loc[index]['%'+elem]/peaksumm)
+        # Redo the sum only for included (real) elems
+        peaksumm=0.0
+        for i, elem in enumerate(real):
+            peaksumm+=row['%'+elem]
+        # Now renormalize real peaks to unity 
+        for i, elem in enumerate(real):
+            AESsumm=AESsumm.set_value(index,'%'+elem, 
+                    AESsumm.loc[index]['%'+elem]/peaksumm)
+        # total shows amount of signal in real peaks
+        AESsumm=AESsumm.set_value(index,'Total', 
+                    peaksumm)
+    AESsumm=AESsumm[mycols]
+    return AESsumm
+
+
 def pickspectraGUI(spelist):
     ''' Quick method of interactively selecting spectral files for plotting 
     only elements with info in quant params csv files are selectable
@@ -30,12 +80,11 @@ def pickspectraGUI(spelist):
     # All available elements/peaks are those with entries in Aesquantparams.csv
     files=np.ndarray.tolist(spelist.Filenumber.unique()) 
     root = tk.Tk()
+    root.title('Select files for plotting or quant')
     varlist=[] # list of tkinter IntVars
     for i, col in enumerate(files): # set up string variables
         varlist.append(tk.IntVar())
         varlist[i].set(1) # default to 1
-        
-    tk.Label(root, text='Select files for plotting or quant').grid(row=0,column=0)
     
     def clearall():
         ''' Set all tkinter vars to zero ''' 
@@ -57,25 +106,25 @@ def pickspectraGUI(spelist):
 
     for i, col in enumerate(files):
         # choose row, col grid position (starting row 1)
-        thisrow=i%3+1 # three column setup
-        thiscol=i//3
+        thiscol=i%20 # 10 column setup
+        thisrow=i//20
         ent=tk.Checkbutton(root, text=files[i], variable=varlist[i])
         ent.grid(row=thisrow, column=thiscol)
     # clear all 
     e=tk.Button(root, text='Clear all', command=clearall)
-    lastrow=len(files)%3+2
+    lastrow=len(files)//20+1
     e.grid(row=lastrow, column=0)
     # select all 
     e=tk.Button(root, text='Select all', command=selectall)
-    lastrow=len(files)%3+3
+    lastrow=len(files)//20+2
     e.grid(row=lastrow, column=0)
     e=tk.Button(root, text='Select combined', command=selectcombined)
-    lastrow=len(files)%3+4
+    lastrow=len(files)//20+3
     e.grid(row=lastrow, column=0)
     # add done button
     f=tk.Button(root, text='done')
     f.bind("<Button-1>", lambda event: root.destroy())
-    lastrow=len(files)%3+5
+    lastrow=len(files)//20+4
     f.grid(row=lastrow, column=0)
 
     root.mainloop()
@@ -87,7 +136,7 @@ def pickspectraGUI(spelist):
     spelist=spelist[spelist['Filenumber'].isin(filelist)]
     return spelist
 
-def pickelemsGUI(AESquantparams):
+def pickelemsGUI(AESquantparams, Smdifpeakslog, Integquantlog):
     ''' Quick method of interactively selecting elements/lines for plotting 
     has some hard-coded presets that can be changed using preset dictionaries below
     only elements with info in quant params csv files are selectable
@@ -115,7 +164,6 @@ def pickelemsGUI(AESquantparams):
         for i, col in enumerate(elems): # set up string variables
             val=preset1.get(col,0) # set to 1 or 0 based on above default dictionary
             varlist[i].set(val) # set default value based on elemdict
-        root.destroy()
 
     def choose2():
         ''' Have available preset defaults and adjust checkbox values '''
@@ -124,7 +172,32 @@ def pickelemsGUI(AESquantparams):
         for i, col in enumerate(elems): # set up string variables
             val=preset2.get(col,0) # set to 1 or 0 based on above default dictionary
             varlist[i].set(val) # set default value based on elemdict
-        root.destroy()
+        
+    def getpriorderiv():
+        ''' Select elements used in prior deriv quant (for consistency)
+        uses smdiff peaks (not integ peaks) '''
+        try:
+            prior=np.ndarray.tolist(Smdifpeakslog.PeakID.unique())
+            for i, col in enumerate(elems): 
+                if col in prior:
+                    varlist[i].set(1)
+                else:
+                    varlist[i].set(0)
+        except: # handles no prior quant 
+            pass
+
+    def getpriorinteg():
+        ''' Select elements used in prior integ/direct peak quant (for consistency)
+        uses smdiff peaks (not integ peaks) '''
+        try:
+            prior=np.ndarray.tolist(Integquantlog.Element.unique())
+            for i, col in enumerate(elems):
+                if col in prior:
+                    varlist[i].set(1)
+                else:
+                    varlist[i].set(0)
+        except: # handles no prior quant 
+            pass        
     def clearall():
         ''' Set all tkinter vars to zero ''' 
         for i, col in enumerate(elems): # set up string variables
@@ -151,11 +224,19 @@ def pickelemsGUI(AESquantparams):
     e=tk.Button(root, text='Clear all', command=clearall)
     lastrow=len(elems)%3+4
     e.grid(row=lastrow, column=0)
-    # add done button
-    f=tk.Button(root, text='done')
-    f.bind("<Button-1>", lambda event: root.destroy())
+    # select prior smdiff deriv elements
+    f=tk.Button(root, text='Select prior deriv elements', command=getpriorderiv)
     lastrow=len(elems)%3+5
     f.grid(row=lastrow, column=0)
+    # select prior integ/direct peak quant elements
+    f=tk.Button(root, text='Select prior integ elements', command=getpriorinteg)
+    lastrow=len(elems)%3+6
+    f.grid(row=lastrow, column=0)
+    # add done button
+    g=tk.Button(root, text='done')
+    g.bind("<Button-1>", lambda event: root.destroy())
+    lastrow=len(elems)%3+7
+    g.grid(row=lastrow, column=0)
 
     root.mainloop()
 
@@ -225,17 +306,30 @@ def loadmainfiles():
         Smdifpeakslog=pd.read_csv('Smdifpeakslog.csv', encoding='cp437')
     else:
         print('Smdifpeakslog not found.')
-        Smdifpeakslog=pd.DataFrame()
+        mycols=['Project', 'Filepath', 'Date', 'Sample', 'Filename', 'Filenumber',
+       'Areanumber', 'Peakenergy', 'Peakindex', 'PeakID', 'Shift', 'Negintensity',
+       'Posintensity', 'Pospeak', 'Amplitude', 'Peakwidth', 'Lowback',
+       'Lowbackamplitude', 'Highback', 'Highbackamplitude', 'Avgbackamplitude',
+       'Quantdetails', 'Comments', 'Adjamp']
+        Smdifpeakslog=pd.DataFrame(columns=mycols)
     if os.path.isfile('Integquantlog.csv'):
         Integquantlog=pd.read_csv('Integquantlog.csv', encoding='cp437')
     else:
         print('Integquantlog not found.')
-        Integquantlog=pd.DataFrame()
+        mycols=['Filenumber', 'Filename', 'Filepath', 'Sample', 'Comments', 
+            'Areanumber', 'Element', 'Integcounts', 'Backcounts', 'Significance', 
+            'Xc', 'Width', 'Peakarea', 'Y0','Rsquared','Numchannels']
+        Integquantlog=pd.DataFrame(columns=mycols)
     if os.path.isfile('Backfitlog.csv'):
         Backfitlog=pd.read_csv('Backfitlog.csv', encoding='cp437')
     else:
         print('Backfitlog not found.')
-        Backfitlog=pd.DataFrame()
+        mycols=['Filenumber', 'Filename', 'Filepath', 'Sample', 'Comments', 
+            'Date', 'Areanumber', 'Element', 'Lower1', 'Lower2', 'Upper1', 
+            'Upper2', 'Lowrange','Highrange','Peakshift', 'Fittype', 'P1',
+            'P1stdev','P2','P2stdev','Rval1','P3','P3stdev','P4','P4stdev',
+            'Rval2']
+        Backfitlog=pd.DataFrame(columns=mycols)
     if os.path.isfile('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Params\\AESquantparams.csv'):
         AESquantparams=pd.read_csv('C:\\Users\\tkc\\Documents\\Python_Scripts\\Augerquant\\Params\\AESquantparams.csv', encoding='cp437')
     else:

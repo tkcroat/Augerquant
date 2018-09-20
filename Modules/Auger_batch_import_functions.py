@@ -133,7 +133,7 @@ def makeblanklog(filelist):
                 Samplelogrow=Samplelogrow.set_value(0,'Filenumber', filenumber)
                 Samplelogrow=Samplelogrow.set_value(0,'Filename', filename) 
                 if thisext=='spe':
-                    Samplelogrow=Samplelogrow.set_value(0,'Mag', '.spe')
+                    Samplelogrow=Samplelogrow.set_value(0,'Mag', 'n/a')
             except:
                 print('Problem extracting filenumber.')      
         Samplelogrow=Samplelogrow.set_value(0,'Project', projname)        
@@ -152,7 +152,7 @@ def openorcreatelogbook(filelist):
     if len(logfile)==1: # found logbook
         name=logfile[0]
         if '.xls' in name: # open log tab of existing excel file
-            Augerlogbook=pd.read_excel(name, sheetname='Log')        
+            Augerlogbook=pd.read_excel(name) # reads first tab        
         if '.csv' in name: # open csv
             Augerlogbook=pd.read_csv(name)
     elif len(logfile)==0:
@@ -765,7 +765,7 @@ def makemultiplex(bindata,  csvdataname, energy, evbreaks, numareas, spectralreg
         multiplex[SDname]=s7d7data[i-1]
         multiplex[savgolname]=savgoldata[i-1] # add savgol data to new column    
     # solve multiplex out of order problem
-    if not pd.algos.is_lexsorted([multiplex.Energy.values]): # data and evbreaks out of order problem
+    if not multiplex.Energy.is_monotonic: # data and evbreaks out of order problem
         multiplex, evbreaks=sortmultiplex(multiplex, evbreaks, spectralregs)
     multiplex.to_csv(csvdataname, index=False) # output data frame to csv file            
     return evbreaks 
@@ -998,8 +998,9 @@ def SpatialAreas(header,fieldofview, filenumber, AugerFileName):
         SpatialAreas.to_csv(filedata, header=False, index=False) # creates file if it doesn't exist
     return numareas, totalarea
     
-def processAuger(AugerFileName):   
-    '''processAuger pulls 20 important parameters from spe file header and saves in csv param log'''
+def processAuger(AugerFileName, **kwargs):   
+    '''processAuger pulls 20 important parameters from spe file header and saves in csv param log
+    kwarg  move (bool)... move to /sub or not'''
     with open(AugerFileName, 'rb') as file:
         filedata = file.read()
     end=filedata.find(b'EOFH')
@@ -1138,12 +1139,14 @@ def processAuger(AugerFileName):
         if spectraltype=='multiplex':
             # for multiplex only need to pass 1) binary data string 2) constructed x values list and 3) number of areas            
             evbreaks=makemultiplex(bindata, csvdataname, energy, evbreaks, numareas, spectralregs)
-    Augerparams.update({'Evbreaks':evbreaks}) # for multiplex calculated in SpectralRegions (or modified after sort), as list not string
-    newname='sub/'+ AugerFileName
-    os.rename(AugerFileName,newname) # move raw sem file to subfolder sub
+    # for multiplex calculated in SpectralRegions (or modified after sort), as list not string
+    Augerparams.update({'Evbreaks':evbreaks}) 
+    if kwargs.get('move',True):
+        newname='sub/'+ AugerFileName
+        os.rename(AugerFileName,newname) # move raw sem file to subfolder sub
     return Augerparams
 
-def processSEM(AugerFileName): 
+def processSEM(AugerFileName, **kwargs): 
     ''' pulls header info parameters from .sem image files and saves in master param log'''
     with open(AugerFileName, 'rb') as file:
         filedata = file.read()
@@ -1152,7 +1155,7 @@ def processSEM(AugerFileName):
     header=headerdata.decode(encoding='cp437') # more generic encoding than utf-8
     # temporary dict for holding important file parameters
     Augerparams={'Filenumber':'','Project':'','Filename':'','FilePath':'','Sample':'','Comments':'','Date':'','FieldofView':'','Type':'','Energy':'','GunVoltage':'','nA':'','Areas':'','Cycles':'','Timestep':'','Details':'','Acqtime':'','Scanarea':'','X':'','Y':'','Z':'','Tilt':'','Rotation':'','ImageshiftX':'','ImageshiftY':''}
-    
+    Augerparams.update({'Type':'Image'})
     Augerparams.update({'Filename':AugerFileName})
     path=os.getcwd()
     Augerparams.update({'FilePath':path})
@@ -1227,11 +1230,12 @@ def processSEM(AugerFileName):
     del(filedata) #binary byte object    
     del(header) # above truncated and converted to header string
     #  should spatial areas log and spectral details logs also be passed to main
-    newname='sub/'+ AugerFileName
-    os.rename(AugerFileName,newname) # move raw sem file to subfolder sub
+    if kwargs.get('move',True):
+        newname='sub/'+ AugerFileName
+        os.rename(AugerFileName,newname) # move raw sem file to subfolder sub
     return Augerparams
     
-def processMap(AugerFileName):   
+def processMap(AugerFileName, **kwargs):   
     ''' pulls header info parameters from Auger .map files and saves in master param log'''
     with open(AugerFileName, 'rb') as file:
         filedata = file.read()
@@ -1331,13 +1335,23 @@ def processMap(AugerFileName):
     del(filedata) #binary byte object    
     del(header) # above truncated and converted to header string
     #  should spatial areas log and spectral details logs also be passed to main
-    newname='sub/'+ AugerFileName
-    os.rename(AugerFileName,newname) # move raw sem file to subfolder sub
+    if kwargs.get('move',True):
+        newname='sub/'+ AugerFileName
+        os.rename(AugerFileName,newname) # move raw sem file to subfolder sub
     return Augerparams
+''' TESTING
+i=0         AugerFileName=unprocessed[i]
 
-def Augerbatchimport(filelist, Augerlogbook):
-    ''' Main import processing loop for spe, map and sem images '''
-    if not os.path.exists('sub'): # create subdirectory for raw spe/sem/map files & csv sub-files (when combined)
+
+'''
+def Augerbatchimport(filelist, Augerlogbook, **kwargs):
+    ''' Main import processing loop for spe, map and sem images 
+    delete from Augerparam log if new parameter grab desired
+    delete csv 
+    kwargs:
+        move (bool) -  move to /sub or not
+    '''
+    if not os.path.exists('sub') and 'move' not in kwargs: # create subdirectory for raw spe/sem/map files & csv sub-files (when combined)
         os.makedirs('sub') # the process functions will move raw files here
     # Set up log file for multiplex spectral regions
     if not os.path.isfile('multiplexspectralregionslog.csv'):
@@ -1355,16 +1369,15 @@ def Augerbatchimport(filelist, Augerlogbook):
         AugerParamLog=pd.read_csv('Augerparamlog.csv', encoding='cp437')
     else: # create blank one
         AugerParamLog=pd.DataFrame(columns=mycols) # Create blank df log for Auger params
-    # check for processed spe files in sub and add these to processed list
+    # Check for processed spe files in sub and add these to processed list
     if os.path.isfile('Augerparamlog_subs.csv'):
         AugerParamLogsub=pd.read_csv('Augerparamlog_subs.csv', encoding='cp437')
         AugerParamLog=pd.concat(AugerParamLog,AugerParamLogsub,ignore_index=True)
     # Process only files not previously processed and loaded into AugerParamLog
     unprocessed=[] # list for unprocessed files
     for i,AugerFileName in enumerate(filelist):
-        AugerFileName=AugerFileName.replace('.spe','.csv')
         processed=AugerParamLog.Filename.unique()
-        if AugerFileName not in processed:
+        if AugerFileName.replace('.spe','.csv') not in processed:
             AugerFileName=AugerFileName.replace('.csv','.spe') # convert back to spe 
             unprocessed.append(AugerFileName)                    
     for i,AugerFileName in enumerate(unprocessed): # Now deal with only unprocessed files
@@ -1373,21 +1386,21 @@ def Augerbatchimport(filelist, Augerlogbook):
         AugerFileParams={} # temp dictionary for this filenumber's Auger file params
         if AugerFileName.endswith('.spe'):
             try:            
-                AugerFileParams = processAuger(AugerFileName) # retrieve IM file params as dictionary
+                AugerFileParams = processAuger(AugerFileName, **kwargs) # retrieve IM file params as dictionary
                 print(AugerFileName, ' processed.')
             except:
                 print('Problem processing spe file ', AugerFileName)
                 continue # move to next
         if AugerFileName.endswith('.sem'):
             try:            
-                AugerFileParams = processSEM(AugerFileName) # retrieve params from sem file
+                AugerFileParams = processSEM(AugerFileName, **kwargs) # retrieve params from sem file
                 print(AugerFileName, ' processed.')
             except:
                 print('Problem processing SEM file ', AugerFileName)
                 continue # move to next
         if AugerFileName.endswith('.map'):
             try:
-                AugerFileParams = processMap(AugerFileName) # retrieve params from sem file
+                AugerFileParams = processMap(AugerFileName, **kwargs) # retrieve params from sem file
                 print(AugerFileName, ' processed.')
             except:
                 print('Problem processing map file ', AugerFileName)
@@ -1407,11 +1420,18 @@ def Augerbatchimport(filelist, Augerlogbook):
         AugerParams=pd.Series(AugerFileParams) # make series from dictionary 
         AugerParamLog=AugerParamLog.append(AugerParams, ignore_index=True) # append series as dataframe 
         # end of loop through unprocessed files
-    AugerParamLog.Filenumber=AugerParamLog.Filenumber.apply(int) # converts all filenumbers to int (sometimes end up as str for unknown reason)
+    try:
+        AugerParamLog.Filenumber=AugerParamLog.Filenumber.apply(int) # converts all filenumbers to int (sometimes end up as str for unknown reason)
+    except:
+        print('Error on filenumber of file', AugerFileName)
     AugerParamLog['Comments']=AugerParamLog['Comments'].replace(np.nan,'', regex=True) # avoids string search filtering errors
     AugerParamLog['Sample']=AugerParamLog['Sample'].replace(np.nan,'', regex=True) # avoids string search filtering errors
     AugerParamLog=AugerParamLog.sort_values(['Filenumber'], ascending=True) # sort by filenumber
     AugerParamLog=AugerParamLog.reset_index(drop=True)
     AugerParamLog=AugerParamLog[mycols] # put in original order
+    if not os.path.exists('Augerparamlog.csv'):
+        AugerParamLog.to_csv('Augerparamlog.csv',index=False)
+    else:
+        print("Not autosaved as Augerparamlog already exists!")
     return AugerParamLog
 
